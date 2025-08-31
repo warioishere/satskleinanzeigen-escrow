@@ -126,10 +126,22 @@ def _stuck_worker():  # pragma: no cover - background worker
                         post_dec = rpc("decodepsbt", [signed_psbt])
                         post_sig = sum(len(i.get("partial_signatures", {})) for i in post_dec.get("inputs", []))
                         if post_sig == pre_sig:
-                            log.info("watch_only_no_signatures", order_id=o["order_id"], sign_count=post_sig)
+                            STUCK_COUNTER.labels(state="watch_only").inc()
+                            log.warning(
+                                "deadline_watchonly_escalated",
+                                order_id=o["order_id"],
+                                sign_count=post_sig,
+                            )
+                            advance_state(o, "dispute")
+                            woo_callback({"event": "dispute_opened", "order_id": o["order_id"]})
+                            continue
                         if post_sig < 2:
                             STUCK_COUNTER.labels(state="insufficient_signatures").inc()
-                            log.info("deadline_escalation_skipped", order_id=o["order_id"], sign_count=post_sig)
+                            log.info(
+                                "deadline_escalation_skipped",
+                                order_id=o["order_id"],
+                                sign_count=post_sig,
+                            )
                             continue
                         final_state = "completed" if o.get("output_type") != "refund" else "refunded"
                         fin = psbt_finalize(FinalizeReq(order_id=o["order_id"], psbt=signed_psbt, state=final_state))

@@ -203,6 +203,10 @@ class WEO_Admin {
     $order_id = $order->get_id();
     $action = $_POST['weo_action'];
     if ($action === 'bumpfee') {
+      if ($order->get_meta('_weo_dispute')) {
+        echo '<div class="notice notice-error"><p>Fee-Bump während Dispute nicht möglich.</p></div>';
+        return;
+      }
       $target = intval($_POST['target_conf'] ?? 1);
       $resp = weo_api_post('/tx/bumpfee', [
         'order_id'    => (string)$order->get_order_number(),

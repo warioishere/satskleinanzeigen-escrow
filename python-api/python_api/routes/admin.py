@@ -80,6 +80,8 @@ def tx_bumpfee(body: BumpFeeReq):
     meta = db.get_order(body.order_id)
     if not meta or not meta.get("payout_txid"):
         raise HTTPException(404, "txid not found")
+    if meta.get("state") == "dispute":
+        raise HTTPException(400, "cannot bump fee during dispute")
     res = rpc("bumpfee", [meta["payout_txid"], {"confTarget": body.target_conf, "psbt": True}])
     psbt = res.get("psbt") if isinstance(res, dict) else None
     if not psbt:

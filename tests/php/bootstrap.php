@@ -33,6 +33,7 @@ function get_option($k){
 
 // Global state
 function wc_get_order($id){ global $test_order; return $test_order; }
+function wc_get_order_id_by_order_key($key){ return 0; }
 function weo_get_option($k,$default=false){ if ($k==='escrow_xpub') return 'XESCROW'; if ($k==='min_conf') return 2; return $default; }
 function weo_validate_amount($a){return $a>=0;}
 function weo_sanitize_order_id($oid){return $oid;}
@@ -40,6 +41,7 @@ function weo_validate_btc_address($addr){return true;}
 
 class WP_Error{ private $msg; public function __construct($c,$m){$this->msg=$m;} public function get_error_message(){return $this->msg;} }
 function is_wp_error($v){ return $v instanceof WP_Error; }
+class WP_REST_Response{ public $data; public $status; public function __construct($d,$s){$this->data=$d; $this->status=$s;} }
 
 // API stubs with configurable responses
 function weo_api_post($path,$body){
@@ -92,4 +94,5 @@ class FakeOrder{
   public function get_billing_email(){return 'buyer@example.com';}
   public function update_status($s,$n){$this->status=$s; $this->notes[]=$n;}
   public function add_order_note($n){$this->notes[]=$n;}
+  public function get_id(){return 1;}
 }

@@ -214,7 +214,7 @@ class WEO_Order {
       echo '</form>';
     }
 
-    if (in_array($state, ['escrow_funded','signing','rbf_signing'])) {
+    if (in_array($state, ['escrow_funded','signing'])) {
       $upload_url = esc_url(admin_url('admin-post.php'));
       $confirm = esc_js(__('Disput wirklich eröffnen? Die Bestellung wird in den Disput-Status versetzt und nur der Admin entscheidet über die Auszahlung.', 'weo'));
       echo '<form method="post" action="'.$upload_url.'" style="margin-top:10px;" onsubmit="return confirm(\''.$confirm.'\');">';
@@ -588,6 +588,7 @@ class WEO_Order {
     if (!$order_id) wp_die('Fehlende Order-ID.');
     if (!check_admin_referer('weo_open_dispute_'.$order_id)) wp_die('Ungültiger Sicherheits-Token.');
     $order = wc_get_order($order_id); if (!$order) wp_die('Bestellung nicht gefunden.');
+    if ($order->get_meta('_weo_rbf_psbt')) wp_die('RBF aktiv – Dispute nicht möglich.');
 
     $buyer_id  = $order->get_user_id();
     $vendor_id = $order->get_meta('_weo_vendor_id');
