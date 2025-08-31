@@ -12,7 +12,7 @@ def create_client(monkeypatch):
     import sqlite3, json, time
     def init_db():
         conn = sqlite3.connect(db_path); conn.row_factory=sqlite3.Row; cur = conn.cursor()
-        cur.execute("CREATE TABLE orders(order_id TEXT PRIMARY KEY, descriptor TEXT, idx INTEGER, min_conf INTEGER, label TEXT, amount_sat INTEGER, fee_est_sat INTEGER, created_at INTEGER, state TEXT, funding_txid TEXT, vout INTEGER, confirmations INTEGER, partials TEXT, outputs TEXT, output_type TEXT, last_webhook_ts INTEGER, payout_txid TEXT, deadline_ts INTEGER)")
+        cur.execute("CREATE TABLE orders(order_id TEXT PRIMARY KEY, descriptor TEXT, idx INTEGER, min_conf INTEGER, label TEXT, amount_sat INTEGER, fee_est_sat INTEGER, created_at INTEGER, state TEXT, funding_txid TEXT, vout INTEGER, confirmations INTEGER, partials TEXT, rbf_partials TEXT, outputs TEXT, output_type TEXT, last_webhook_ts INTEGER, payout_txid TEXT, deadline_ts INTEGER, rbf_psbt TEXT, rbf_state TEXT)")
         conn.commit(); conn.close()
     def next_index():
         conn = sqlite3.connect(db_path); conn.row_factory=sqlite3.Row; cur = conn.execute("SELECT MAX(idx) FROM orders"); row = cur.fetchone(); conn.close(); return (row[0]+1) if row and row[0] is not None else 0
@@ -33,14 +33,26 @@ def create_client(monkeypatch):
         conn=sqlite3.connect(db_path); conn.row_factory=sqlite3.Row; import json as js; conn.execute("UPDATE orders SET partials=? WHERE order_id=?", (js.dumps(partials), order_id)); conn.commit(); conn.close()
     def get_partials(order_id):
         conn=sqlite3.connect(db_path); conn.row_factory=sqlite3.Row; cur=conn.execute("SELECT partials FROM orders WHERE order_id=?", (order_id,)); row=cur.fetchone(); conn.close(); import json as js; return js.loads(row[0]) if row and row[0] else []
+    def save_rbf_partials(order_id, partials):
+        conn=sqlite3.connect(db_path); conn.row_factory=sqlite3.Row; import json as js; conn.execute("UPDATE orders SET rbf_partials=? WHERE order_id=?", (js.dumps(partials), order_id)); conn.commit(); conn.close()
+    def get_rbf_partials(order_id):
+        conn=sqlite3.connect(db_path); conn.row_factory=sqlite3.Row; cur=conn.execute("SELECT rbf_partials FROM orders WHERE order_id=?", (order_id,)); row=cur.fetchone(); conn.close(); import json as js; return js.loads(row[0]) if row and row[0] else []
     def set_payout_txid(order_id, txid):
         conn=sqlite3.connect(db_path); conn.row_factory=sqlite3.Row; conn.execute("UPDATE orders SET payout_txid=? WHERE order_id=?", (txid, order_id)); conn.commit(); conn.close()
     def update_funding(order_id, txid, vout, conf):
         conn=sqlite3.connect(db_path); conn.row_factory=sqlite3.Row; conn.execute("UPDATE orders SET funding_txid=?, vout=?, confirmations=? WHERE order_id=?", (txid, vout, conf, order_id)); conn.commit(); conn.close()
+    def start_rbf(order_id, psbt):
+        conn=sqlite3.connect(db_path); conn.row_factory=sqlite3.Row; cur=conn.execute("SELECT state FROM orders WHERE order_id=?", (order_id,)); row=cur.fetchone(); prev=row[0] if row else None; conn.execute("UPDATE orders SET rbf_psbt=?, rbf_partials=NULL, partials=NULL, rbf_state=?, state='rbf_signing' WHERE order_id=?", (psbt, prev, order_id)); conn.commit(); conn.close()
+    def get_rbf_psbt(order_id):
+        conn=sqlite3.connect(db_path); conn.row_factory=sqlite3.Row; cur=conn.execute("SELECT rbf_psbt FROM orders WHERE order_id=?", (order_id,)); row=cur.fetchone(); conn.close(); return row[0] if row and row[0] else None
+    def clear_rbf(order_id):
+        conn=sqlite3.connect(db_path); conn.row_factory=sqlite3.Row; cur=conn.execute("SELECT rbf_state FROM orders WHERE order_id=?", (order_id,)); row=cur.fetchone(); nxt=row[0] if row else None; conn.execute("UPDATE orders SET rbf_psbt=NULL, rbf_partials=NULL, rbf_state=NULL, state=? WHERE order_id=?", (nxt, order_id)); conn.commit(); conn.close()
     stub.init_db=init_db; stub.next_index=next_index; stub.upsert_order=upsert_order
     stub.get_order=get_order; stub.update_state=update_state; stub.set_outputs=set_outputs
     stub.get_outputs=get_outputs; stub.save_partials=save_partials; stub.get_partials=get_partials
+    stub.save_rbf_partials=save_rbf_partials; stub.get_rbf_partials=get_rbf_partials
     stub.set_payout_txid=set_payout_txid; stub.update_funding=update_funding
+    stub.start_rbf=start_rbf; stub.get_rbf_psbt=get_rbf_psbt; stub.clear_rbf=clear_rbf
     stub.count_pending_signatures=lambda:0
     stub.list_orders_by_states=lambda states: []
     sys.modules['db']=stub
@@ -83,6 +95,18 @@ def stub_rpc(method, params=None):
             }
         elif psbt == 'psbtR':
             return {'tx': {'vout': [{'value': 0.00055, 'scriptPubKey': {'addresses': ['tb1qrefunded0']}}]}}
+        elif psbt == 'rbfBase':
+            return {
+                'tx': {
+                    'vin': [
+                        {'txid': 'tx1', 'vout': 0, 'sequence': 0xfffffffd},
+                        {'txid': 'tx2', 'vout': 1, 'sequence': 0xfffffffd},
+                    ],
+                    'vout': [
+                        {'value': 0.0006, 'scriptPubKey': {'addresses': ['tb1qseller111']}}
+                    ],
+                }
+            }
         else:
             return {'inputs': [{'partial_signatures': {'a': 's'}}], 'tx': {'vout': [{'value': 0.0006, 'scriptPubKey': {'addresses': ['tb1qseller111']}}]}}
     if method == 'analyzepsbt':
@@ -98,7 +122,7 @@ def stub_rpc(method, params=None):
     if method == 'sendrawtransaction':
         return 'txid123'
     if method == 'bumpfee':
-        return {'txid':'bumped'}
+        return {'psbt':'rbfBase'}
     if method == 'estimatesmartfee':
         return {'feerate':0.0001}
     return {}
@@ -216,7 +240,12 @@ def test_full_payout_flow(monkeypatch):
     assert r.json()['txid']=='txid123'
     r=client.post('/tx/bumpfee', json={'order_id':'order1','target_conf':2}, headers=headers)
     assert r.status_code==200, r.text
-    assert r.json()['txid']=='bumped'
+    psbt = r.json()['psbt']
+    assert psbt=='rbfBase'
+    # finalize bumped transaction
+    r=client.post('/tx/bumpfee/finalize', json={'order_id':'order1','psbt':psbt}, headers=headers)
+    assert r.status_code==200, r.text
+    assert r.json()['txid']=='txid123'
 
 
 def test_payout_build_insufficient(monkeypatch):

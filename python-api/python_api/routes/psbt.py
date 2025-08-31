@@ -107,10 +107,14 @@ def psbt_merge(body: MergeReq):
         existing = db.get_order(body.order_id)
         if not existing:
             raise HTTPException(404, "order not found")
-        prev = db.get_partials(body.order_id)
+        rbf = existing.get("state") == "rbf_signing"
+        prev = db.get_rbf_partials(body.order_id) if rbf else db.get_partials(body.order_id)
         new_parts = [p for p in body.partials if p not in prev]
         merged_list = prev + new_parts
-        db.save_partials(body.order_id, merged_list)
+        if rbf:
+            db.save_rbf_partials(body.order_id, merged_list)
+        else:
+            db.save_partials(body.order_id, merged_list)
         update_pending_gauge()
     merged = rpc("combinepsbt", [merged_list])
     return PSBTRes(psbt=merged)
