@@ -221,6 +221,15 @@ class PSBTRefundReq(BaseModel):
     rbf: bool = True
     target_conf: int = Field(3, ge=1, le=100)
 
+class PayoutQuoteReq(BaseModel):
+    address: constr(strip_whitespace=True, regex=r'^(bc1|tb1)[0-9ac-hj-np-z]{8,87}$')
+    rbf: bool = True
+    target_conf: int = Field(3, ge=1, le=100)
+
+class PayoutQuoteRes(BaseModel):
+    payout_sat: int
+    fee_sat: int
+
 class PSBTRes(BaseModel):
     psbt: str
 
@@ -442,28 +451,74 @@ def order_status(order_id: str):
     if not utxos:
         return StatusRes(state=meta["state"], deadline_ts=meta.get("deadline_ts"))
 
-    # nimm größtes UTXO (oder summe, je nach Policy)
-    u = sorted(utxos, key=lambda x: x.get("amount",0), reverse=True)[0]
-    tx = rpc("gettransaction", [u["txid"]])
-    confs = int(tx.get("confirmations", 0))
-    db.update_funding(order_id, u["txid"], u["vout"], confs)
-    state = meta["state"]
-    if confs >= int(meta["min_conf"]):
-        changed = advance_state(meta, "escrow_funded", confs)
-        state = "escrow_funded"
-        if changed:
-            woo_callback({"order_id": order_id, "event":"escrow_funded", "txid": u["txid"], "confs": confs})
-    res = StatusRes(
-        funding={
+    total_sat = 0
+    funding_utxos = []
+    min_conf = None
+    for u in utxos:
+        tx = rpc("gettransaction", [u["txid"]])
+        conf = int(tx.get("confirmations", 0))
+        sat = int(round(u.get("amount", 0) * 1e8))
+        total_sat += sat
+        funding_utxos.append({
             "txid": u["txid"],
             "vout": u["vout"],
-            "value_sat": int(round(u["amount"] * 1e8)),
-            "confirmations": confs,
+            "value_sat": sat,
+            "confirmations": conf,
+        })
+        if min_conf is None or conf < min_conf:
+            min_conf = conf
+
+    first = utxos[0]
+    db.update_funding(order_id, first["txid"], first["vout"], min_conf or 0)
+
+    state = meta["state"]
+    expected = int(meta.get("amount_sat") or 0)
+    if min_conf is not None and min_conf >= int(meta["min_conf"]) and total_sat >= expected:
+        changed = advance_state(meta, "escrow_funded", min_conf)
+        state = "escrow_funded"
+        if changed:
+            woo_callback({
+                "order_id": order_id,
+                "event": "escrow_funded",
+                "utxos": funding_utxos,
+                "total_sat": total_sat,
+                "confs": min_conf,
+            })
+
+    res = StatusRes(
+        funding={
+            "utxos": funding_utxos,
+            "total_sat": total_sat,
+            "confirmations": min_conf,
         },
         state=state,
         deadline_ts=meta.get("deadline_ts"),
     )
     return res
+
+@app.post("/orders/{order_id}/payout_quote", response_model=PayoutQuoteRes, dependencies=[Depends(require_api_key)])
+def payout_quote(order_id: str, body: PayoutQuoteReq):
+    order_id_var.set(order_id)
+    meta = db.get_order(order_id)
+    if not meta:
+        raise HTTPException(404, "order not found")
+    utxos = find_utxos_for_label(meta["label"], int(meta["min_conf"]))
+    if not utxos:
+        raise HTTPException(400, "no funded utxo")
+    ins = [{"txid": u["txid"], "vout": u["vout"]} for u in utxos]
+    opts = {
+        "includeWatching": True,
+        "replaceable": body.rbf,
+        "conf_target": body.target_conf,
+        "subtractFeeFromOutputs": [0],
+    }
+    psbt = rpc("walletcreatefundedpsbt", [ins, [{body.address: 0}], 0, opts])
+    dec = rpc("decodepsbt", [psbt])
+    vout0 = dec.get("tx", {}).get("vout", [{}])[0]
+    payout_sat = int(round(vout0.get("value", 0) * 1e8))
+    in_total = sum(int(round(u.get("amount", 0) * 1e8)) for u in utxos)
+    fee_sat = in_total - payout_sat
+    return PayoutQuoteRes(payout_sat=payout_sat, fee_sat=fee_sat)
 
 @app.post("/psbt/build", response_model=PSBTRes, dependencies=[Depends(require_api_key)])
 def psbt_build(body: PSBTBuildReq):
@@ -612,19 +667,28 @@ def psbt_finalize(body: FinalizeReq):
         log.error("psbt_fee_mismatch", psbt_fee=dec["fee"], calc_fee=fee / 1e8)
         raise HTTPException(400, "fee mismatch")
 
+    if meta:
+        funding_utxos = find_utxos_for_label(meta["label"], 0)
+        funded_total = sum(int(round(u.get("amount", 0) * 1e8)) for u in funding_utxos)
+        if out_total + fee > funded_total:
+            log.error("psbt_exceeds_funding", funded=funded_total, spending=out_total + fee)
+            raise HTTPException(400, "spends more than funded amount")
+
     fin = rpc("finalizepsbt", [body.psbt])
     if not fin.get("complete"):
         raise HTTPException(400, "not enough signatures")
-    if meta:
-        if body.state not in {"completed", "refunded", "dispute"}:
-            raise HTTPException(400, "invalid final state")
-        advance_state(meta, body.state)
+    if meta and body.state not in {"completed", "refunded", "dispute"}:
+        raise HTTPException(400, "invalid final state")
     return {"hex": fin["hex"], "fee_sat": fee}
 
 @app.post("/tx/broadcast", dependencies=[Depends(require_api_key)])
 def tx_broadcast(body: BroadcastReq):
+    meta = None
     if body.order_id:
         order_id_var.set(body.order_id)
+        meta = db.get_order(body.order_id)
+        if not meta:
+            raise HTTPException(404, "order not found")
     try:
         txid = rpc("sendrawtransaction", [body.hex])
     except HTTPException as e:
@@ -634,17 +698,16 @@ def tx_broadcast(body: BroadcastReq):
             sentry_sdk.capture_message(
                 f"broadcast failed for order {body.order_id or 'n/a'}: {e.detail}"
             )
+        # Leave order in previous state if broadcast fails
         raise
-    if body.order_id:
-        meta = db.get_order(body.order_id)
-        if meta:
-            db.set_payout_txid(body.order_id, txid)
-            if body.state not in {"completed", "refunded", "dispute"}:
-                raise HTTPException(400, "invalid final state")
-            advance_state(meta, body.state)
-            if not meta.get("last_webhook_ts"):
-                event = "settled" if body.state == "completed" else body.state
-                woo_callback({"order_id": body.order_id, "event": event, "txid": txid})
+    if body.order_id and meta:
+        db.set_payout_txid(body.order_id, txid)
+        if body.state not in {"completed", "refunded", "dispute"}:
+            raise HTTPException(400, "invalid final state")
+        advance_state(meta, body.state)
+        if not meta.get("last_webhook_ts"):
+            event = "settled" if body.state == "completed" else body.state
+            woo_callback({"order_id": body.order_id, "event": event, "txid": txid})
     return {"txid": txid}
 
 
