@@ -1,0 +1,244 @@
+<?php
+if (!defined('ABSPATH')) exit;
+
+class WEO_Order {
+  public function __construct() {
+    add_action('woocommerce_thankyou',        [$this,'render_order_panel'], 20);
+    add_action('woocommerce_view_order',      [$this,'render_order_panel'], 20);
+
+    // Adresse/Watcher beim Statuswechsel anlegen (du kannst den Trigger anpassen)
+    add_action('woocommerce_order_status_changed', [$this,'maybe_create_escrow'],10,4);
+
+    // Admin-Metabox
+    add_action('add_meta_boxes', [$this,'metabox']);
+
+    // Upload signierter PSBTs
+    add_action('admin_post_weo_upload_psbt', [$this,'handle_upload']);
+
+    // Assets
+    add_action('wp_enqueue_scripts', [$this,'enqueue_assets']);
+  }
+
+  /** Frontend-CSS/JS laden (nur auf Bestellseiten) */
+  public function enqueue_assets() {
+    if (is_order_received_page() || is_account_page()) {
+      wp_enqueue_style('weo-css', WEO_URL.'assets/admin.css', [], '1.0');
+      wp_enqueue_script('weo-qr',  WEO_URL.'assets/qr.min.js', [], '1.0', true);
+    }
+  }
+
+  /** Beim Wechsel in on-hold (oder wie du willst) Escrow-Adresse erzeugen */
+  public function maybe_create_escrow($order_id, $from, $to, $order) {
+    if (!$order instanceof WC_Order) $order = wc_get_order($order_id);
+    if (!$order) return;
+
+    // Beispiel: wenn von "pending" nach "on-hold" → Adresse anlegen
+    if (!($from === 'pending' && $to === 'on-hold')) return;
+
+    $buyer_xpub  = $order->get_meta('_weo_buyer_xpub');
+    $vendor_xpub = WEO_Vendor::get_vendor_xpub_by_order($order_id);
+    $escrow_xpub = weo_get_option('escrow_xpub');
+
+    if (!$buyer_xpub || !$vendor_xpub || !$escrow_xpub) return;
+
+    // Betrag in sats (optional – reine Info für API; echtes UTXO-Tracking macht Core)
+    // Falls du fiat Preise nutzt, ersetz die Umrechnung hier sinnvoll (oder entferne amount_sat)
+    $amount_sat = 0;
+
+    // deterministischer Index pro Order
+    $index   = abs(crc32('weo-'.$order->get_order_number())) % 1000000;
+    $min_conf = intval(weo_get_option('min_conf',2));
+
+    $res = weo_api_post('/orders', [
+      'order_id'   => (string)$order->get_order_number(),
+      'amount_sat' => $amount_sat,
+      'buyer'      => ['xpub'=>$buyer_xpub],
+      'seller'     => ['xpub'=>$vendor_xpub],
+      'escrow'     => ['xpub'=>$escrow_xpub],
+      'index'      => $index,
+      'min_conf'   => $min_conf
+    ]);
+
+    if (!is_wp_error($res)) {
+      if (!empty($res['escrow_address'])) $order->update_meta_data('_weo_escrow_addr', $res['escrow_address']);
+      if (!empty($res['watch_id']))       $order->update_meta_data('_weo_watch_id',    $res['watch_id']);
+      $order->save();
+    }
+  }
+
+  /** Bestellpanel (Thankyou & "Bestellung ansehen") */
+  public function render_order_panel($order_id) {
+    $order = wc_get_order($order_id); if (!$order) return;
+
+    $addr   = $order->get_meta('_weo_escrow_addr');
+    $watch  = $order->get_meta('_weo_watch_id');
+
+    echo '<section class="weo-escrow">';
+    echo '<h2>Escrow</h2>';
+
+    if (!$addr) {
+      echo '<p>Escrow-Adresse wird vorbereitet …</p>';
+      echo '</section>';
+      return;
+    }
+
+    // Status von API holen
+    $status  = weo_api_get('/orders/'.rawurlencode($order->get_order_number()).'/status');
+    $funding = is_wp_error($status) ? null : ($status['funding'] ?? null);
+    $state   = is_wp_error($status) ? 'unknown' : ($status['state'] ?? 'unknown');
+
+    // Adresse + QR + Copy
+    $addr_esc = esc_html($addr);
+    $addr_js  = esc_js($addr);
+
+    echo '<p><strong>Einzahlungsadresse:</strong> <code id="weo_addr">'.$addr_esc.'</code></p>';
+
+    echo '<div class="weo-qr">';
+    echo '  <div id="weo_qr"></div>';
+    echo '  <p><button type="button" id="weo_copy" class="button">Adresse kopieren</button></p>';
+    echo '</div>';
+
+    // Funding/Status
+    if ($funding) {
+      $txid = esc_html($funding['txid'] ?? '');
+      $confs = intval($funding['confirmations'] ?? 0);
+      $val   = isset($funding['value_sat']) ? intval($funding['value_sat']).' sats' : '';
+      echo "<p>Funding TX: <code>{$txid}</code> • Confs: {$confs} • Betrag: {$val}</p>";
+    } else {
+      echo '<p>Noch keine Einzahlung erkannt.</p>';
+    }
+    echo '<p>Status: <strong>'.esc_html($state).'</strong></p>';
+
+    // PSBT-Flow nur wenn funded
+    if ($state === 'escrow_funded') {
+      $nonce = wp_create_nonce('weo_psbt_'.$order_id);
+
+      // PSBT (Payout) erstellen
+      echo '<form method="post" action="" style="margin-top:15px;">';
+      echo '<input type="hidden" name="weo_action" value="build_psbt_payout">';
+      echo '<input type="hidden" name="weo_nonce" value="'.$nonce.'">';
+      echo '<p><button class="button">PSBT (Auszahlung an Verkäufer) erstellen</button></p>';
+      echo '</form>';
+
+      // Signierte PSBT hochladen
+      echo '<form method="post" action="'.esc_url(admin_url('admin-post.php')).'" style="margin-top:10px;">';
+      echo '<input type="hidden" name="action" value="weo_upload_psbt">';
+      echo '<input type="hidden" name="order_id" value="'.intval($order_id).'">';
+      echo '<p><label>Signierte PSBT (Base64)</label><br/>';
+      echo '<textarea name="weo_signed_psbt" rows="6" style="width:100%" placeholder="PSBT…"></textarea></p>';
+      echo '<p><button class="button button-primary">Signierte PSBT hochladen</button></p>';
+      echo '</form>';
+    }
+
+    echo '</section>';
+
+    // Inline-Skript für QR + Copy + optional PSBT-Build Ausgabe
+    echo "<script>
+    (function(){
+      try {
+        if (window.QRCode && document.getElementById('weo_qr')) {
+          new QRCode(document.getElementById('weo_qr'), '{$addr_js}');
+        }
+        var btn = document.getElementById('weo_copy');
+        if (btn) {
+          btn.addEventListener('click', function(){
+            var t = document.createElement('textarea');
+            t.value = '{$addr_js}';
+            document.body.appendChild(t);
+            t.select(); document.execCommand('copy'); document.body.removeChild(t);
+            btn.textContent = 'Kopiert!';
+            setTimeout(function(){ btn.textContent = 'Adresse kopieren'; }, 1500);
+          });
+        }
+      } catch(e) {}
+    })();
+    </script>";
+
+    // Handle PSBT-Build direkt nach dem Panel (MVP – du kannst es auch in separatem Endpoint lösen)
+    if (!empty($_POST['weo_action']) && $_POST['weo_action']==='build_psbt_payout' && wp_verify_nonce($_POST['weo_nonce'],'weo_psbt_'.$order_id)) {
+      $payoutAddr = get_user_meta($order->get_meta('_weo_vendor_id'), 'weo_vendor_payout_address', true);
+      if (!$payoutAddr) $payoutAddr = $this->fallback_vendor_payout_address($order_id);
+
+      // Betrag: i. d. R. voller Escrow-Input – hier vereinfachend Order-Total in sats (falls du Fixpreis in BTC nutzt, pass das an)
+      $amount_sats = intval(round($order->get_total()*1e8)); // ACHTUNG: nur korrekt, wenn Preis in BTC gespeichert ist
+
+      $resp = weo_api_post('/psbt/build', [
+        'order_id'    => (string)$order->get_order_number(),
+        'outputs'     => [ $payoutAddr => $amount_sats ],
+        'rbf'         => true,
+        'target_conf' => 3
+      ]);
+
+      if (!is_wp_error($resp) && !empty($resp['psbt'])) {
+        $psbt_b64 = esc_textarea($resp['psbt']);
+        echo '<div class="notice weo weo-info"><p><strong>PSBT (Base64):</strong></p><textarea rows="6" style="width:100%;">'.$psbt_b64.'</textarea><p>Bitte in deiner Wallet laden, signieren und unten wieder hochladen.</p></div>';
+      } else {
+        echo '<div class="notice weo weo-error"><p>PSBT konnte nicht erstellt werden.</p></div>';
+      }
+    }
+  }
+
+  /** Upload signierter PSBT → Merge/Finalize/Broadcast via API */
+  public function handle_upload() {
+    if (!is_user_logged_in()) wp_die('Nicht erlaubt.');
+    $order_id = intval($_POST['order_id'] ?? 0);
+    $psbt = trim(wp_unslash($_POST['weo_signed_psbt'] ?? ''));
+    if (!$order_id || !$psbt) wp_die('Fehlende Daten.');
+
+    $order = wc_get_order($order_id); if (!$order) wp_die('Bestellung nicht gefunden.');
+
+    // Partials sammeln (alternativ: direkt an API senden, die intern speichert)
+    $partials = (array) $order->get_meta('_weo_psbt_partials');
+    $partials[] = $psbt;
+    $order->update_meta_data('_weo_psbt_partials', $partials); $order->save();
+
+    // Merge
+    $merge = weo_api_post('/psbt/merge', [
+      'order_id' => (string)$order->get_order_number(),
+      'partials' => $partials
+    ]);
+    if (is_wp_error($merge) || empty($merge['psbt'])) {
+      wp_safe_redirect(wp_get_referer()); exit;
+    }
+
+    // Finalize
+    $final = weo_api_post('/psbt/finalize', [
+      'order_id' => (string)$order->get_order_number(),
+      'psbt'     => $merge['psbt']
+    ]);
+
+    // Wenn noch nicht genug Signaturen da sind
+    if (is_wp_error($final) || empty($final['hex'])) {
+      wc_add_notice('Noch nicht genügend Signaturen – zweite Unterschrift erforderlich.', 'notice');
+      wp_safe_redirect(wp_get_referer()); exit;
+    }
+
+    // Broadcast
+    $tx = weo_api_post('/tx/broadcast', ['hex'=>$final['hex']]);
+    if (!is_wp_error($tx) && !empty($tx['txid'])) {
+      $order->update_status('completed', 'Escrow ausgezahlt. TXID: '.$tx['txid']);
+    }
+
+    wp_safe_redirect(wp_get_referer()); exit;
+  }
+
+  /** Admin-Metabox */
+  public function metabox() {
+    add_meta_box('weo_meta','Escrow',[$this,'meta_view'],'shop_order','side','high');
+  }
+
+  public function meta_view($post) {
+    $order = wc_get_order($post->ID);
+    echo '<p>Addr: <code>'.esc_html($order->get_meta('_weo_escrow_addr')).'</code></p>';
+    echo '<p>Watch: <code>'.esc_html($order->get_meta('_weo_watch_id')).'</code></p>';
+    $partials = (array)$order->get_meta('_weo_psbt_partials');
+    if ($partials) {
+      echo '<p>Signaturen: '.count($partials).'</p>';
+    }
+  }
+
+  /** Fallback – trag hier eine Vendor-Payout-Adresse ein, falls nicht separat gepflegt */
+  private function fallback_vendor_payout_address($order_id) {
+    return get_option('weo_vendor_payout_fallback','bc1qexamplefallbackaddressxxxxxxxxxxxxxxxxxx');
+  }
+}
