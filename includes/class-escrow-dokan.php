@@ -9,17 +9,11 @@ class WEO_Dokan {
 
   public function nav($urls) {
     if (!current_user_can('vendor') && !current_user_can('seller')) return $urls;
-    $urls['weo-treuhand'] = [
+    $urls['weo-treuhand-orders'] = [
       'title' => __('Treuhand Service','weo'),
       'icon'  => '<i class="dashicons-lock"></i>',
-      'url'   => dokan_get_navigation_url('weo-treuhand'),
-      'pos'   => 51,
-    ];
-    $urls['weo-treuhand-orders'] = [
-      'title' => __('Treuhand-Bestellungen','weo'),
-      'icon'  => '<i class="dashicons-cart"></i>',
       'url'   => dokan_get_navigation_url('weo-treuhand-orders'),
-      'pos'   => 52,
+      'pos'   => 51,
     ];
     return $urls;
   }
@@ -137,7 +131,7 @@ class WEO_Dokan {
       wp_enqueue_style('weo-css', WEO_URL.'assets/admin.css', [], '1.0');
       wp_enqueue_script('weo-qr', WEO_URL.'assets/qr.min.js', [], '1.0', true);
 
-      $orders = wc_get_orders([
+      $vendor_orders = wc_get_orders([
         'limit'         => -1,
         'customer'      => 0,
         'meta_key'      => '_weo_vendor_id',
@@ -145,9 +139,16 @@ class WEO_Dokan {
         'payment_method'=> 'weo_gateway',
         'return'        => 'objects',
       ]);
+      $buyer_orders = wc_get_orders([
+        'limit'         => -1,
+        'customer'      => $user_id,
+        'payment_method'=> 'weo_gateway',
+        'return'        => 'objects',
+      ]);
 
       $list = [];
-      foreach ($orders as $order) {
+      $seen = [];
+      foreach ($vendor_orders as $order) {
         $addr = $order->get_meta('_weo_escrow_addr');
         $oid  = weo_sanitize_order_id((string)$order->get_order_number());
         $state = 'unknown';
@@ -169,6 +170,35 @@ class WEO_Dokan {
           'received' => intval($order->get_meta('_weo_received')),
           'buyer_id' => $order->get_user_id(),
           'vendor_id'=> intval($order->get_meta('_weo_vendor_id')),
+          'role'     => 'vendor',
+        ];
+        $seen[$order->get_id()] = true;
+      }
+
+      foreach ($buyer_orders as $order) {
+        if (isset($seen[$order->get_id()])) continue;
+        $addr = $order->get_meta('_weo_escrow_addr');
+        $oid  = weo_sanitize_order_id((string)$order->get_order_number());
+        $state = 'unknown';
+        $funding = null;
+        if ($addr && $oid) {
+          $status = weo_api_get('/orders/'.rawurlencode($oid).'/status');
+          if (!is_wp_error($status)) {
+            $state = $status['state'] ?? 'unknown';
+            $funding = $status['funding'] ?? null;
+          }
+        }
+        $list[] = [
+          'id'       => $order->get_id(),
+          'number'   => $order->get_order_number(),
+          'addr'     => $addr,
+          'state'    => $state,
+          'funding'  => $funding,
+          'shipped'  => intval($order->get_meta('_weo_shipped')),
+          'received' => intval($order->get_meta('_weo_received')),
+          'buyer_id' => $order->get_user_id(),
+          'vendor_id'=> intval($order->get_meta('_weo_vendor_id')),
+          'role'     => 'buyer',
         ];
       }
 
