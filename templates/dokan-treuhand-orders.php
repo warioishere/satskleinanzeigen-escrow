@@ -16,7 +16,7 @@ if (!defined('ABSPATH')) exit;
       <?php endif; ?>
       <?php if (!empty($o['addr'])) : ?>
         <p><strong><?php esc_html_e('Escrow-Adresse','weo'); ?>:</strong> <code id="weo_addr_<?php echo intval($o['id']); ?>"><?php echo esc_html($o['addr']); ?></code></p>
-        <div class="weo-qr" id="weo_qr_<?php echo intval($o['id']); ?>"></div>
+        <div class="weo-qr" id="weo_qr_<?php echo intval($o['id']); ?>" data-addr="<?php echo esc_attr($o['addr']); ?>"></div>
       <?php endif; ?>
 
       <p><?php esc_html_e('Versand','weo'); ?>: <?php echo $o['shipped'] ? esc_html(date_i18n(get_option('date_format'), $o['shipped'])) : esc_html__('noch nicht bestätigt','weo'); ?></p>
@@ -91,9 +91,9 @@ if (!defined('ABSPATH')) exit;
   <script>
   (function(){
     if (!window.QRCode) return;
-    <?php foreach ($orders as $o) : if (!empty($o['addr'])) : ?>
-    new QRCode(document.getElementById('weo_qr_<?php echo intval($o['id']); ?>'), '<?php echo esc_js($o['addr']); ?>');
-    <?php endif; endforeach; ?>
+    document.querySelectorAll('.weo-qr[data-addr]').forEach(function(el){
+      new QRCode(el, el.getAttribute('data-addr'));
+    });
   })();
   </script>
 <?php else : ?>

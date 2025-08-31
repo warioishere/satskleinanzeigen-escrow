@@ -27,6 +27,9 @@ class WEO_Dokan {
     $user_id = get_current_user_id();
 
     if (isset($query_vars['weo-treuhand-orders'])) {
+      wp_enqueue_style('weo-css', WEO_URL.'assets/admin.css', [], '1.0');
+      wp_enqueue_script('weo-qr', WEO_URL.'assets/qr.min.js', [], '1.0', true);
+
       $psbt_notice = '';
 
       if ('POST' === $_SERVER['REQUEST_METHOD'] && !empty($_POST['weo_action']) && !empty($_POST['order_id'])) {
@@ -128,9 +131,6 @@ class WEO_Dokan {
           }
         }
       }
-
-      wp_enqueue_style('weo-css', WEO_URL.'assets/admin.css', [], '1.0');
-      wp_enqueue_script('weo-qr', WEO_URL.'assets/qr.min.js', [], '1.0', true);
 
       $vendor_orders = wc_get_orders([
         'limit'         => -1,
