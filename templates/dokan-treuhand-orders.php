@@ -2,6 +2,7 @@
 if (!defined('ABSPATH')) exit;
 ?>
 <?php if (!empty($psbt_notice)) echo $psbt_notice; ?>
+<p><?php esc_html_e('PSBTs können jederzeit über diesen Bereich "Treuhand Service" im Dokan-Dashboard erneut abgerufen und signiert werden.','weo'); ?></p>
 <?php if (!empty($orders)) : ?>
   <?php foreach ($orders as $o) : ?>
     <div class="weo-escrow-order">
@@ -15,6 +16,9 @@ if (!defined('ABSPATH')) exit;
         <p><?php esc_html_e('Funding TX','weo'); ?>: <code><?php echo $txid; ?></code> • <?php esc_html_e('Confs','weo'); ?>: <?php echo $confs; ?> • <?php esc_html_e('Betrag','weo'); ?>: <?php echo esc_html($val); ?></p>
       <?php else : ?>
         <p><?php esc_html_e('Noch keine Einzahlung erkannt.','weo'); ?></p>
+      <?php endif; ?>
+      <?php if (!empty($o['payout_txid'])) : ?>
+        <p><?php esc_html_e('Auszahlungs-TXID','weo'); ?>: <code><?php echo esc_html($o['payout_txid']); ?></code></p>
       <?php endif; ?>
       <?php if (!empty($o['addr'])) : ?>
         <p><strong><?php esc_html_e('Escrow-Adresse','weo'); ?>:</strong> <code id="weo_addr_<?php echo intval($o['id']); ?>"><?php echo esc_html($o['addr']); ?></code></p>
@@ -78,6 +82,9 @@ if (!defined('ABSPATH')) exit;
           <textarea name="weo_signed_psbt" id="weo_signed_psbt_<?php echo intval($o['id']); ?>" rows="6" style="width:100%" placeholder="PSBT..."></textarea>
         </div>
         <div class="dokan-form-group">
+          <label><input type="checkbox" name="weo_release_funds" value="1"> <?php esc_html_e('Freigabe der Escrow-Mittel bestätigen','weo'); ?></label>
+        </div>
+        <div class="dokan-form-group">
           <button type="submit" class="dokan-btn dokan-btn-theme"><?php esc_html_e('PSBT hochladen','weo'); ?></button>
         </div>
       </form>
@@ -90,6 +97,9 @@ if (!defined('ABSPATH')) exit;
         <div class="dokan-form-group">
           <label class="dokan-form-label" for="weo_signed_psbt_<?php echo intval($o['id']); ?>"><?php esc_html_e('Signierte PSBT (Base64)','weo'); ?></label>
           <textarea name="weo_signed_psbt" id="weo_signed_psbt_<?php echo intval($o['id']); ?>" rows="6" style="width:100%" placeholder="PSBT..."></textarea>
+        </div>
+        <div class="dokan-form-group">
+          <label><input type="checkbox" name="weo_release_funds" value="1"> <?php esc_html_e('Freigabe der Escrow-Mittel bestätigen','weo'); ?></label>
         </div>
         <div class="dokan-form-group">
           <button type="submit" class="dokan-btn dokan-btn-theme"><?php esc_html_e('PSBT hochladen','weo'); ?></button>

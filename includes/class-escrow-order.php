@@ -113,6 +113,7 @@ class WEO_Order {
     echo '<li>'.esc_html__('Verkäufer markiert Versand, Käufer bestätigt den Empfang.', 'weo').'</li>';
     echo '<li>'.esc_html__('Beide Parteien erstellen eine PSBT, signieren sie und laden sie hoch.', 'weo').'</li>';
     echo '</ol>';
+    echo '<p>'.esc_html__('Die PSBT kann jederzeit im Dokan-Dashboard unter "Treuhand Service" erneut abgerufen und signiert werden.', 'weo').'</p>';
     $doc_url = esc_url(plugins_url('docs/woo-user-guide.md', WEO_PLUGIN_FILE));
     echo '<p><a href="'.$doc_url.'" target="_blank" rel="noopener">'.esc_html__('Zur ausführlichen Anleitung', 'weo').'</a></p>';
 
@@ -182,6 +183,9 @@ class WEO_Order {
     }
 
     $payout_txid = $order->get_meta('_weo_payout_txid');
+    if ($payout_txid) {
+      echo '<p>'.esc_html__('Auszahlungs-TXID','weo').': <code>'.esc_html($payout_txid).'</code></p>';
+    }
     if ($state === 'signing' || $payout_txid) {
       $nonce = wp_create_nonce('weo_psbt_'.$order_id);
       echo '<form method="post" action="" style="margin-top:10px;">';
@@ -241,6 +245,7 @@ class WEO_Order {
         echo '<input type="hidden" name="order_id" value="'.intval($order_id).'">';
         echo '<p><label>Signierte PSBT (Base64, Käufer)</label><br/>';
         echo '<textarea name="weo_signed_psbt" rows="6" style="width:100%" placeholder="PSBT…"></textarea></p>';
+        echo '<p><label><input type="checkbox" name="weo_release_funds" value="1"> '.esc_html__('Freigabe der Escrow-Mittel bestätigen','weo').'</label></p>';
         echo '<p><button class="button button-primary">PSBT hochladen</button></p>';
         echo '</form>';
       }
@@ -252,6 +257,7 @@ class WEO_Order {
         echo '<input type="hidden" name="order_id" value="'.intval($order_id).'">';
         echo '<p><label>Signierte PSBT (Base64, Verkäufer)</label><br/>';
         echo '<textarea name="weo_signed_psbt" rows="6" style="width:100%" placeholder="PSBT…"></textarea></p>';
+        echo '<p><label><input type="checkbox" name="weo_release_funds" value="1"> '.esc_html__('Freigabe der Escrow-Mittel bestätigen','weo').'</label></p>';
         echo '<p><button class="button button-primary">PSBT hochladen</button></p>';
         echo '</form>';
       }
@@ -315,6 +321,7 @@ class WEO_Order {
           if ($cur && $cur == $vendor_id) {
             $order->update_meta_data('_weo_shipped', time());
             $order->save();
+            do_action('weo_order_shipped', $order_id);
             echo '<div class="notice weo weo-info"><p>Versand bestätigt.</p></div>';
           } else {
             echo '<div class="notice weo weo-error"><p>Keine Berechtigung.</p></div>';
@@ -327,6 +334,7 @@ class WEO_Order {
           if ($cur && $cur == $buyer_id) {
             $order->update_meta_data('_weo_received', time());
             $order->save();
+            do_action('weo_order_received', $order_id);
             echo '<div class="notice weo weo-info"><p>Empfang bestätigt.</p></div>';
           } else {
             echo '<div class="notice weo weo-error"><p>Keine Berechtigung.</p></div>';
@@ -349,82 +357,24 @@ class WEO_Order {
             echo '<div class="notice weo weo-error"><p>Fee-Bump fehlgeschlagen.</p></div>';
           }
         } else {
-          $oid = weo_sanitize_order_id((string)$order->get_order_number());
           if ($act === 'build_psbt_payout') {
-            $payoutAddr = get_user_meta($order->get_meta('_weo_vendor_id'), 'weo_vendor_payout_address', true);
-            if (!$payoutAddr) $payoutAddr = $this->fallback_vendor_payout_address($order_id);
-            if (!weo_validate_btc_address($payoutAddr)) {
-              echo '<div class="notice weo weo-error"><p>Payout-Adresse ungültig.</p></div>';
-              return;
-            }
-            $status = weo_api_get('/orders/'.rawurlencode($oid).'/status');
-            $funded = is_wp_error($status) ? 0 : intval($status['funding']['total_sat'] ?? 0);
-            if ($funded <= 0) {
-              echo '<div class="notice weo weo-error"><p>Keine Escrow-Einzahlung gefunden.</p></div>';
-              return;
-            }
-            $quote = weo_api_post('/orders/'.rawurlencode($oid).'/payout_quote', [
-              'address'     => $payoutAddr,
-              'target_conf' => 3,
-            ]);
-            if (is_wp_error($quote) || empty($quote['payout_sat'])) {
-              echo '<div class="notice weo weo-error"><p>Fee-Kalkulation fehlgeschlagen.</p></div>';
-              return;
-            }
-            $amount_sats = intval($quote['payout_sat']);
-            if ($amount_sats <= 0 || !weo_validate_amount($amount_sats)) {
-              echo '<div class="notice weo weo-error"><p>Betrag ungültig.</p></div>';
-              return;
-            }
-            $resp = weo_api_post('/psbt/build', [
-              'order_id'    => $oid,
-              'outputs'     => [ $payoutAddr => $amount_sats ],
-              'rbf'         => true,
-              'target_conf' => 3,
-            ]);
+            $res = WEO_Psbt::build_payout_psbt($order_id);
           } elseif ($act === 'build_psbt_refund') {
             if (!current_user_can('manage_options')) {
-              echo '<div class="notice weo weo-error"><p>Keine Berechtigung.</p></div>';
-              return;
+              $res = new WP_Error('weo_psbt', __('Keine Berechtigung.','weo'));
+            } else {
+              $res = WEO_Psbt::build_refund_psbt($order_id);
             }
-            $refundAddr = get_user_meta($order->get_user_id(), 'weo_buyer_payout_address', true);
-            if (!$refundAddr) {
-              echo '<div class="notice weo weo-error"><p>Keine Käuferadresse hinterlegt.</p></div>';
-              return;
-            }
-            if (!weo_validate_btc_address($refundAddr)) {
-              echo '<div class="notice weo weo-error"><p>Adresse ungültig.</p></div>';
-              return;
-            }
-            $resp = weo_api_post('/psbt/build_refund', [
-              'order_id'    => $oid,
-              'address'     => $refundAddr,
-              'target_conf' => 3
-            ]);
           } else {
-            $resp = null;
+            $res = null;
           }
 
-          if (!empty($resp) && !is_wp_error($resp) && !empty($resp['psbt'])) {
-            $psbt_b64 = esc_textarea($resp['psbt']);
-            $details = '';
-            $dec = weo_api_post('/psbt/decode', [ 'psbt' => $resp['psbt'] ]);
-            if (!is_wp_error($dec)) {
-              $outs = $dec['outputs'] ?? [];
-              if ($outs) {
-                $details .= '<p><strong>'.esc_html__('Outputs','weo').':</strong></p><ul>';
-                foreach ($outs as $addr => $sats) {
-                  $details .= '<li>'.esc_html($addr).' – '.esc_html(number_format_i18n($sats)).' sats</li>';
-                }
-                $details .= '</ul>';
-              }
-              if (isset($dec['fee_sat'])) {
-                $details .= '<p><strong>'.esc_html__('Gebühr','weo').':</strong> '.esc_html(number_format_i18n(intval($dec['fee_sat']))).' sats</p>';
-              }
-            }
+          if (is_array($res)) {
+            $psbt_b64 = $res['psbt'];
+            $details  = $res['details'];
             echo '<div class="notice weo weo-info"><p><strong>PSBT (Base64):</strong></p><textarea rows="6" style="width:100%;">'.$psbt_b64.'</textarea>'.$details.'<p>Bitte in deiner Wallet laden, signieren und unten wieder hochladen.</p></div>';
-          } elseif ($resp !== null) {
-            echo '<div class="notice weo weo-error"><p>PSBT konnte nicht erstellt werden.</p></div>';
+          } elseif ($res) {
+            echo '<div class="notice weo weo-error"><p>'.esc_html($res->get_error_message()).'</p></div>';
           }
         }
       }
@@ -481,9 +431,21 @@ class WEO_Order {
     $order->update_meta_data('_weo_psbt_sign_count', $signs);
     $order->save();
 
+    do_action('weo_psbt_uploaded', $order_id, $cur);
+
     // Bei offenem Dispute keine Finalisierung/Broadcast
     if ($order->get_meta('_weo_dispute')) {
       wc_add_notice(__('Dispute offen – Auszahlung erfolgt erst nach Entscheidung des Administrators.','weo'), 'notice');
+      wp_safe_redirect(wp_get_referer()); exit;
+    }
+
+    // Auszahlen nur, wenn zwei Signaturen und Freigabe vorliegen
+    if ($signs < 2) {
+      wc_add_notice('Noch nicht genügend Signaturen – zweite Unterschrift erforderlich.', 'notice');
+      wp_safe_redirect(wp_get_referer()); exit;
+    }
+    if (empty($_POST['weo_release_funds'])) {
+      wc_add_notice(__('Bitte bestätige die Freigabe der Escrow-Mittel.','weo'), 'notice');
       wp_safe_redirect(wp_get_referer()); exit;
     }
 
@@ -493,9 +455,8 @@ class WEO_Order {
       'psbt'     => $merge['psbt']
     ]);
 
-    // Wenn noch nicht genug Signaturen da sind
     if (is_wp_error($final) || empty($final['hex'])) {
-      wc_add_notice('Noch nicht genügend Signaturen – zweite Unterschrift erforderlich.', 'notice');
+      wc_add_notice('Finalisierung fehlgeschlagen. Bitte später erneut versuchen.', 'error');
       wp_safe_redirect(wp_get_referer()); exit;
     }
 
