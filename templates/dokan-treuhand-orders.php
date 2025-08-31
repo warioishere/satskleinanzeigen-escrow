@@ -28,6 +28,8 @@ if (!defined('ABSPATH')) exit;
       <p><?php esc_html_e('Versand','weo'); ?>: <?php echo $o['shipped'] ? esc_html(date_i18n(get_option('date_format'), $o['shipped'])) : esc_html__('noch nicht bestätigt','weo'); ?></p>
       <p><?php esc_html_e('Empfang','weo'); ?>: <?php echo $o['received'] ? esc_html(date_i18n(get_option('date_format'), $o['received'])) : esc_html__('noch nicht bestätigt','weo'); ?></p>
 
+      <?php $can_release = $o['shipped'] && $o['received']; ?>
+
       <?php $ship_nonce = wp_create_nonce('weo_ship_'.$o['id']); ?>
       <?php if ($o['role'] === 'vendor' && empty($o['shipped'])) : ?>
         <form method="post" class="dokan-form" style="margin-top:10px;">
@@ -82,7 +84,11 @@ if (!defined('ABSPATH')) exit;
           <textarea name="weo_signed_psbt" id="weo_signed_psbt_<?php echo intval($o['id']); ?>" rows="6" style="width:100%" placeholder="PSBT..."></textarea>
         </div>
         <div class="dokan-form-group">
-          <label><input type="checkbox" name="weo_release_funds" value="1"> <?php esc_html_e('Freigabe der Escrow-Mittel bestätigen','weo'); ?></label>
+          <?php if ($can_release) : ?>
+            <label><input type="checkbox" name="weo_release_funds" value="1"> <?php esc_html_e('Freigabe der Escrow-Mittel bestätigen','weo'); ?></label>
+          <?php else : ?>
+            <p><?php esc_html_e('Versand/Empfang noch offen – Freigabe nicht möglich.','weo'); ?></p>
+          <?php endif; ?>
         </div>
         <div class="dokan-form-group">
           <button type="submit" class="dokan-btn dokan-btn-theme"><?php esc_html_e('PSBT hochladen','weo'); ?></button>
@@ -99,7 +105,11 @@ if (!defined('ABSPATH')) exit;
           <textarea name="weo_signed_psbt" id="weo_signed_psbt_<?php echo intval($o['id']); ?>" rows="6" style="width:100%" placeholder="PSBT..."></textarea>
         </div>
         <div class="dokan-form-group">
-          <label><input type="checkbox" name="weo_release_funds" value="1"> <?php esc_html_e('Freigabe der Escrow-Mittel bestätigen','weo'); ?></label>
+          <?php if ($can_release) : ?>
+            <label><input type="checkbox" name="weo_release_funds" value="1"> <?php esc_html_e('Freigabe der Escrow-Mittel bestätigen','weo'); ?></label>
+          <?php else : ?>
+            <p><?php esc_html_e('Versand/Empfang noch offen – Freigabe nicht möglich.','weo'); ?></p>
+          <?php endif; ?>
         </div>
         <div class="dokan-form-group">
           <button type="submit" class="dokan-btn dokan-btn-theme"><?php esc_html_e('PSBT hochladen','weo'); ?></button>

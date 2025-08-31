@@ -154,6 +154,7 @@ class WEO_Order {
 
     $shipped  = intval($order->get_meta('_weo_shipped'));
     $received = intval($order->get_meta('_weo_received'));
+    $ready_release = $shipped && $received;
     echo '<p>Versand: ' . ($shipped ? date_i18n(get_option('date_format'), $shipped) : 'noch nicht bestätigt') . '</p>';
     echo '<p>Empfang: ' . ($received ? date_i18n(get_option('date_format'), $received) : 'noch nicht bestätigt') . '</p>';
 
@@ -245,7 +246,11 @@ class WEO_Order {
         echo '<input type="hidden" name="order_id" value="'.intval($order_id).'">';
         echo '<p><label>Signierte PSBT (Base64, Käufer)</label><br/>';
         echo '<textarea name="weo_signed_psbt" rows="6" style="width:100%" placeholder="PSBT…"></textarea></p>';
-        echo '<p><label><input type="checkbox" name="weo_release_funds" value="1"> '.esc_html__('Freigabe der Escrow-Mittel bestätigen','weo').'</label></p>';
+        if ($ready_release) {
+          echo '<p><label><input type="checkbox" name="weo_release_funds" value="1"> '.esc_html__('Freigabe der Escrow-Mittel bestätigen','weo').'</label></p>';
+        } else {
+          echo '<p>'.esc_html__('Versand/Empfang noch offen – Freigabe nicht möglich.','weo').'</p>';
+        }
         echo '<p><button class="button button-primary">PSBT hochladen</button></p>';
         echo '</form>';
       }
@@ -257,7 +262,11 @@ class WEO_Order {
         echo '<input type="hidden" name="order_id" value="'.intval($order_id).'">';
         echo '<p><label>Signierte PSBT (Base64, Verkäufer)</label><br/>';
         echo '<textarea name="weo_signed_psbt" rows="6" style="width:100%" placeholder="PSBT…"></textarea></p>';
-        echo '<p><label><input type="checkbox" name="weo_release_funds" value="1"> '.esc_html__('Freigabe der Escrow-Mittel bestätigen','weo').'</label></p>';
+        if ($ready_release) {
+          echo '<p><label><input type="checkbox" name="weo_release_funds" value="1"> '.esc_html__('Freigabe der Escrow-Mittel bestätigen','weo').'</label></p>';
+        } else {
+          echo '<p>'.esc_html__('Versand/Empfang noch offen – Freigabe nicht möglich.','weo').'</p>';
+        }
         echo '<p><button class="button button-primary">PSBT hochladen</button></p>';
         echo '</form>';
       }
@@ -446,6 +455,14 @@ class WEO_Order {
     }
     if (empty($_POST['weo_release_funds'])) {
       wc_add_notice(__('Bitte bestätige die Freigabe der Escrow-Mittel.','weo'), 'notice');
+      wp_safe_redirect(wp_get_referer()); exit;
+    }
+
+    // Versand/Empfang müssen bestätigt sein
+    $shipped  = intval($order->get_meta('_weo_shipped'));
+    $received = intval($order->get_meta('_weo_received'));
+    if (!$shipped || !$received) {
+      wc_add_notice(__('Versand/Empfang noch offen – Freigabe nicht möglich.','weo'), 'notice');
       wp_safe_redirect(wp_get_referer()); exit;
     }
 
