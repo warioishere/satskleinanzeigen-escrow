@@ -15,9 +15,21 @@ from ..models import (
 from ..rpc import rpc, find_utxos_for_label
 from ..config import require_api_key
 from ..logging import order_id_var, log
-from ..workers import advance_state, update_pending_gauge
+from ..workers import advance_state, update_pending_gauge, woo_callback
 
 router = APIRouter()
+
+
+def _decode_outputs(psbt: str) -> Dict[str, int]:
+    dec = rpc("decodepsbt", [psbt])
+    outs = dec.get("tx", {}).get("vout", [])
+    res: Dict[str, int] = {}
+    for o in outs:
+        addrs = o.get("scriptPubKey", {}).get("addresses", [])
+        if len(addrs) != 1:
+            raise HTTPException(400, "unexpected output")
+        res[addrs[0]] = int(round(o.get("value", 0) * 1e8))
+    return res
 
 
 @router.post("/psbt/build", response_model=PSBTRes, dependencies=[Depends(require_api_key)])
@@ -219,3 +231,59 @@ def psbt_finalize(body: FinalizeReq):
     if meta and body.state not in {"completed", "refunded", "dispute"}:
         raise HTTPException(400, "invalid final state")
     return {"hex": fin["hex"], "fee_sat": fee}
+
+
+@router.post("/tx/bumpfee/finalize", dependencies=[Depends(require_api_key)])
+def tx_bumpfee_finalize(body: FinalizeReq):
+    order_id_var.set(body.order_id)
+    meta = db.get_order(body.order_id)
+    if not meta or meta.get("state") != "rbf_signing":
+        raise HTTPException(404, "rbf not in progress")
+    base_psbt = db.get_rbf_psbt(body.order_id)
+    if not base_psbt:
+        raise HTTPException(404, "rbf psbt not found")
+
+    base_dec = rpc("decodepsbt", [base_psbt])
+    new_dec = rpc("decodepsbt", [body.psbt])
+    base_ins = base_dec.get("tx", {}).get("vin", [])
+    new_ins = new_dec.get("tx", {}).get("vin", [])
+    if len(base_ins) != len(new_ins):
+        raise HTTPException(400, "inputs mismatch")
+    for a, b in zip(base_ins, new_ins):
+        if a.get("txid") != b.get("txid") or a.get("vout") != b.get("vout"):
+            raise HTTPException(400, "inputs mismatch")
+        if b.get("sequence", 0xffffffff) >= 0xfffffffe:
+            raise HTTPException(400, "RBF disabled")
+
+    base_outs = _decode_outputs(base_psbt)
+    new_outs = _decode_outputs(body.psbt)
+    if new_outs != base_outs:
+        raise HTTPException(400, "outputs mismatch")
+
+    orig_outs = db.get_outputs(body.order_id)
+    decreased = []
+    for addr, amt in orig_outs.items():
+        new_amt = new_outs.get(addr)
+        if new_amt is None:
+            raise HTTPException(400, "missing output")
+        if new_amt > amt:
+            raise HTTPException(400, "output increased")
+        if new_amt < amt:
+            decreased.append(addr)
+    if len(decreased) != 1:
+        raise HTTPException(400, "fee not taken from change")
+    if sum(new_outs.values()) >= sum(orig_outs.values()):
+        raise HTTPException(400, "no fee bump")
+
+    fin = rpc("finalizepsbt", [body.psbt])
+    if not fin.get("complete"):
+        raise HTTPException(400, "not enough signatures")
+    txid = rpc("sendrawtransaction", [fin["hex"]])
+    db.set_payout_txid(body.order_id, txid)
+    db.clear_rbf(body.order_id)
+    meta = db.get_order(body.order_id)
+    if meta:
+        event = "settled" if meta.get("state") == "completed" else meta.get("state")
+        if event:
+            woo_callback({"order_id": body.order_id, "event": event, "txid": txid})
+    return {"txid": txid}

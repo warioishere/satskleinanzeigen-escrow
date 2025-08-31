@@ -103,7 +103,8 @@ def stub_rpc(method, params=None):
                         {'txid': 'tx2', 'vout': 1, 'sequence': 0xfffffffd},
                     ],
                     'vout': [
-                        {'value': 0.0006, 'scriptPubKey': {'addresses': ['tb1qseller111']}}
+                        {'value': 0.0006, 'scriptPubKey': {'addresses': ['tb1qseller111']}},
+                        {'value': 0.00004, 'scriptPubKey': {'addresses': ['tb1qchange000']}},
                     ],
                 }
             }
@@ -114,8 +115,14 @@ def stub_rpc(method, params=None):
     if method == 'combinepsbt':
         return 'merged'
     if method == 'gettransaction':
+        txid = params[0]
+        if txid == 'tx2':
+            return {'confirmations':2,'details':[{'vout':1,'label':'escrow:order1'}]}
         return {'confirmations':2,'details':[{'vout':0,'label':'escrow:order1'}]}
     if method == 'gettxout':
+        txid, vout = params
+        if txid == 'tx2' and vout == 1:
+            return {'value':0.000065}
         return {'value':0.0006}
     if method == 'finalizepsbt':
         return {'hex':'deadbeef','complete':True}
@@ -238,6 +245,8 @@ def test_full_payout_flow(monkeypatch):
     r=client.post('/tx/broadcast', json={'order_id':'order1','hex':'deadbeef','state':'completed'}, headers=headers)
     assert r.status_code==200, r.text
     assert r.json()['txid']=='txid123'
+    from db import set_outputs as _set_outputs
+    _set_outputs('order1', {'tb1qseller111':60000, 'tb1qchange000':5000}, 'payout')
     r=client.post('/tx/bumpfee', json={'order_id':'order1','target_conf':2}, headers=headers)
     assert r.status_code==200, r.text
     psbt = r.json()['psbt']
