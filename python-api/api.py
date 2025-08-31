@@ -548,7 +548,10 @@ def payout_quote(order_id: str, body: PayoutQuoteReq):
         "conf_target": body.target_conf,
         "subtractFeeFromOutputs": [0],
     }
-    psbt = rpc("walletcreatefundedpsbt", [ins, [{body.address: 0}], 0, opts])
+    res = rpc("walletcreatefundedpsbt", [ins, {body.address: 0}, 0, opts])
+    if res.get("changepos", -1) != -1:
+        raise HTTPException(400, "unexpected change output")
+    psbt = res.get("psbt")
     dec = rpc("decodepsbt", [psbt])
     vout0 = dec.get("tx", {}).get("vout", [{}])[0]
     payout_sat = int(round(vout0.get("value", 0) * 1e8))

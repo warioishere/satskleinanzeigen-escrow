@@ -64,11 +64,15 @@ def stub_rpc(method, params=None):
         return ['tb1qaddr']
     if method == 'walletcreatefundedpsbt':
         outs = params[1]
+        if isinstance(outs, list):
+            raise ValueError('outputs must be object')
         if outs == {'tb1qrefunded0': 0}:
             return {'psbt':'psbtR','changepos':-1}
         return {'psbt':'psbtP','changepos':-1}
     if method == 'decodepsbt':
         psbt=params[0]
+        if not isinstance(psbt, str):
+            raise ValueError('psbt must be str')
         if psbt=='merged':
             return {'tx':{'vin':[{'txid':'tx1','vout':0,'sequence':0xfffffffd}], 'vout':[{'value':0.00055,'scriptPubKey':{'addresses':['tb1qseller111']}}]}, 'inputs':[{'partial_signatures':{'a':'s','b':'s'}}]}
         elif psbt=='psbtR':
@@ -95,6 +99,21 @@ def stub_rpc(method, params=None):
 def stub_utxos(label, min_conf):
     return [{'txid':'tx1','vout':0,'amount':0.0006}]
 
+
+def test_payout_quote(monkeypatch):
+    client=create_client(monkeypatch)
+    import api
+    monkeypatch.setattr(api, 'rpc', stub_rpc)
+    monkeypatch.setattr(api, 'find_utxos_for_label', stub_utxos)
+    headers={'x-api-key':'testkey'}
+    body={'order_id':'orderQ','buyer':{'xpub':'X'},'seller':{'xpub':'Y'},'escrow':{'xpub':'Z'},'min_conf':2,'amount_sat':60000}
+    r=client.post('/orders', json=body, headers=headers)
+    assert r.status_code==200
+    r=client.get('/orders/orderQ/status', headers=headers)
+    assert r.json()['state']=='escrow_funded'
+    r=client.post('/orders/orderQ/payout_quote', json={'address':'tb1qseller111'}, headers=headers)
+    assert r.status_code==200, r.text
+    assert r.json()=={'payout_sat':55000,'fee_sat':5000}
 
 def test_full_payout_flow(monkeypatch):
     client=create_client(monkeypatch)
