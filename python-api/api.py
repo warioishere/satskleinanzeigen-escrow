@@ -1,10 +1,11 @@
 import os, json, hmac, hashlib, time
-from typing import Dict, Any, List, Optional
+from typing import Any, Dict, List, Optional
 from fastapi import FastAPI, HTTPException, Header, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import requests
 from dotenv import load_dotenv
+import db
 
 load_dotenv()
 
@@ -22,6 +23,8 @@ if not _origins_env:
 ALLOW_ORIGINS    = [o.strip() for o in _origins_env.split(",") if o.strip()]
 WOO_CALLBACK_URL = os.getenv("WOO_CALLBACK_URL", "")
 WOO_HMAC_SECRET  = os.getenv("WOO_HMAC_SECRET", "")
+
+db.init_db()
 
 # ---- FastAPI app ----
 app = FastAPI(title="Escrow API (2-of-3 P2WSH, PSBT)")
@@ -96,7 +99,6 @@ class BroadcastReq(BaseModel):
     order_id: Optional[str] = None
 
 # ---- Helpers ----
-ORDERS: Dict[str, Dict[str, Any]] = {}  # in-memory (ersetzbar durch DB)
 
 def build_descriptor(xpub_b: str, xpub_s: str, xpub_e: str, index: int) -> str:
     # sortedmulti sortiert intern – Reihenfolge ist egal; wir geben sie wie geliefert weiter
@@ -146,21 +148,21 @@ def create_order(body: CreateOrderReq):
     }]])
     addr = rpc("deriveaddresses", [desc_ck, [body.index, body.index]])[0]
 
-    ORDERS[body.order_id] = {
-        "descriptor": desc_ck,
-        "index": body.index,
-        "min_conf": body.min_conf,
-        "label": label
-    }
-    return CreateOrderRes(escrow_address=addr, descriptor=desc_ck, watch_id=f"escrow_{body.order_id}_{body.index}")
+    db.upsert_order(body.order_id, desc_ck, body.index, body.min_conf, label)
+    return CreateOrderRes(
+        escrow_address=addr,
+        descriptor=desc_ck,
+        watch_id=f"escrow_{body.order_id}_{body.index}"
+    )
 
 @app.get("/orders/{order_id}/status", response_model=StatusRes, dependencies=[Depends(require_api_key)])
 def order_status(order_id: str):
-    meta = ORDERS.get(order_id)
+    meta = db.get_order(order_id)
     if not meta:
         return StatusRes(state="awaiting_deposit")
     utxos = find_utxos_for_label(meta["label"], 0)
     if not utxos:
+        db.update_state(order_id, "awaiting_deposit")
         return StatusRes(state="awaiting_deposit")
 
     # nimm größtes UTXO (oder summe, je nach Policy)
@@ -168,6 +170,8 @@ def order_status(order_id: str):
     tx = rpc("gettransaction", [u["txid"]])
     confs = int(tx.get("confirmations", 0))
     state = "escrow_funded" if confs >= int(meta["min_conf"]) else "awaiting_deposit"
+    db.update_funding(order_id, u["txid"], u["vout"], confs)
+    db.update_state(order_id, state)
     res = StatusRes(
         funding={
             "txid": u["txid"], "vout": u["vout"],
@@ -182,7 +186,7 @@ def order_status(order_id: str):
 
 @app.post("/psbt/build", response_model=PSBTRes, dependencies=[Depends(require_api_key)])
 def psbt_build(body: PSBTBuildReq):
-    meta = ORDERS.get(body.order_id)
+    meta = db.get_order(body.order_id)
     if not meta:
         raise HTTPException(404, "order not found")
     utxos = find_utxos_for_label(meta["label"], int(meta["min_conf"]))
@@ -199,6 +203,8 @@ def psbt_merge(body: MergeReq):
     if not body.partials:
         raise HTTPException(400, "no partials")
     merged = rpc("combinepsbt", [body.partials])
+    if body.order_id:
+        db.save_partials(body.order_id, body.partials)
     return PSBTRes(psbt=merged)
 
 @app.post("/psbt/finalize", dependencies=[Depends(require_api_key)])
