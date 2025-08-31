@@ -127,6 +127,8 @@ class WEO_Order {
       echo '<p>Noch keine Einzahlung erkannt.</p>';
     }
     echo '<p>Status: <strong>'.esc_html($state).'</strong></p>';
+    $signs = intval($order->get_meta('_weo_psbt_sign_count'));
+    echo '<p>Signaturen: '. $signs . '/2</p>';
 
     // PSBT-Flow nur wenn funded
     if ($state === 'escrow_funded') {
@@ -290,6 +292,11 @@ class WEO_Order {
       wp_safe_redirect(wp_get_referer()); exit;
     }
 
+    $dec = weo_api_post('/psbt/decode', [ 'psbt' => $merge['psbt'] ]);
+    $signs = is_wp_error($dec) ? 0 : intval($dec['sign_count'] ?? 0);
+    $order->update_meta_data('_weo_psbt_sign_count', $signs);
+    $order->save();
+
     // Finalize
     $final = weo_api_post('/psbt/finalize', [
       'order_id' => (string)$order->get_order_number(),
@@ -320,12 +327,8 @@ class WEO_Order {
     $order = wc_get_order($post->ID);
     echo '<p>Addr: <code>'.esc_html($order->get_meta('_weo_escrow_addr')).'</code></p>';
     echo '<p>Watch: <code>'.esc_html($order->get_meta('_weo_watch_id')).'</code></p>';
-    $pb = (array)$order->get_meta('_weo_psbt_partials_buyer');
-    $ps = (array)$order->get_meta('_weo_psbt_partials_seller');
-    $cnt = count($pb) + count($ps);
-    if ($cnt) {
-      echo '<p>Signaturen: '.$cnt.'</p>';
-    }
+    $cnt = intval($order->get_meta('_weo_psbt_sign_count'));
+    echo '<p>Signaturen: '. $cnt . '/2</p>';
   }
 
   /** Fallback – trag hier eine Vendor-Payout-Adresse ein, falls nicht separat gepflegt */

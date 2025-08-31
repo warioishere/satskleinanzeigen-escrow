@@ -126,6 +126,12 @@ class BroadcastReq(BaseModel):
     order_id: Optional[str] = None
     state: str = "completed"
 
+class DecodeReq(BaseModel):
+    psbt: str
+
+class DecodeRes(BaseModel):
+    sign_count: int
+
 # ---- Webhook worker ----
 
 _webhook_q: queue.Queue = queue.Queue()
@@ -289,6 +295,16 @@ def psbt_merge(body: MergeReq):
         db.save_partials(body.order_id, merged_list)
     merged = rpc("combinepsbt", [merged_list])
     return PSBTRes(psbt=merged)
+
+@app.post("/psbt/decode", response_model=DecodeRes, dependencies=[Depends(require_api_key)])
+def psbt_decode(body: DecodeReq):
+    dec = rpc("decodepsbt", [body.psbt])
+    inputs = dec.get("inputs", [])
+    count = 0
+    if inputs:
+        sigs = inputs[0].get("partial_signatures") or {}
+        count = len(sigs)
+    return DecodeRes(sign_count=count)
 
 @app.post("/psbt/finalize", dependencies=[Depends(require_api_key)])
 def psbt_finalize(body: FinalizeReq):
