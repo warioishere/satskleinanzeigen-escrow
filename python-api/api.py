@@ -1,11 +1,14 @@
-import os, json, hmac, hashlib, time, threading, queue
+import os, json, hmac, hashlib, time, threading, queue, uuid, logging, sys
 from typing import Any, Dict, List, Optional
-from fastapi import FastAPI, HTTPException, Header, Depends
+from fastapi import FastAPI, HTTPException, Header, Depends, Request
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field, validator, root_validator, constr
 import re, base64
 import requests
 from dotenv import load_dotenv
+import structlog
+from contextvars import ContextVar
+from starlette.middleware.base import BaseHTTPMiddleware
 import db
 
 load_dotenv()
@@ -28,6 +31,22 @@ WEBHOOK_RETRIES  = int(os.getenv("WEBHOOK_RETRIES", "3"))
 WEBHOOK_BACKOFF  = float(os.getenv("WEBHOOK_BACKOFF", "2"))
 
 db.init_db()
+
+# ---- logging ----
+logging.basicConfig(stream=sys.stdout, format="%(message)s", level=logging.INFO)
+structlog.configure(
+    processors=[
+        structlog.processors.TimeStamper(fmt="iso"),
+        structlog.processors.add_log_level,
+        structlog.processors.JSONRenderer(),
+    ],
+    logger_factory=structlog.stdlib.LoggerFactory(),
+)
+log = structlog.get_logger()
+
+req_id_var: ContextVar[Optional[str]] = ContextVar("request_id", default=None)
+order_id_var: ContextVar[Optional[str]] = ContextVar("order_id", default=None)
+actor_var: ContextVar[Optional[str]] = ContextVar("actor", default=None)
 
 # ---- State machine ----
 STATES = [
@@ -58,6 +77,35 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+
+class LoggingMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next):
+        request_id = request.headers.get("X-Request-ID") or str(uuid.uuid4())
+        req_id_var.set(request_id)
+        actor = request.headers.get("X-Actor")
+        if actor:
+            actor_var.set(actor)
+        start = time.time()
+        response = await call_next(request)
+        duration = time.time() - start
+        log.info(
+            "request",
+            request_id=request_id,
+            method=request.method,
+            path=str(request.url.path),
+            status=response.status_code,
+            duration=duration,
+            order_id=order_id_var.get(),
+            actor=actor_var.get(),
+        )
+        order_id_var.set(None)
+        actor_var.set(None)
+        req_id_var.set(None)
+        return response
+
+
+app.add_middleware(LoggingMiddleware)
+
 @app.on_event("startup")
 def _startup_worker():
     if WOO_CALLBACK_URL and WOO_HMAC_SECRET:
@@ -71,16 +119,29 @@ def require_api_key(x_api_key: Optional[str] = Header(None)):
 
 # ---- Bitcoin Core RPC ----
 def rpc(method: str, params: List[Any] = None) -> Any:
+    bound = log.bind(
+        request_id=req_id_var.get(),
+        order_id=order_id_var.get(),
+        actor=actor_var.get(),
+        rpc_method=method,
+    )
     url = BTC_CORE_URL.rstrip("/") + f"/wallet/{BTC_CORE_WALLET}"
     payload = {"jsonrpc":"1.0","id":"escrow","method":method,"params":params or []}
     auth = (BTC_CORE_USER, BTC_CORE_PASS) if BTC_CORE_USER or BTC_CORE_PASS else None
-    r = requests.post(url, json=payload, auth=auth, timeout=25)
+    start = time.time()
+    bound.info("rpc_start", params=params)
+    r = None
     try:
+        r = requests.post(url, json=payload, auth=auth, timeout=25)
         j = r.json()
-    except Exception:
-        raise HTTPException(status_code=502, detail=f"Core RPC bad response ({r.status_code})")
+    except Exception as e:
+        bound.error("rpc_error", error=str(e), duration=time.time()-start)
+        raise HTTPException(status_code=502, detail=f"Core RPC bad response ({getattr(r, 'status_code', 'n/a')})")
     if j.get("error"):
+        bound.error("rpc_error", error=j["error"], duration=time.time()-start)
         raise HTTPException(status_code=500, detail=j["error"]["message"])
+    duration = time.time() - start
+    bound.info("rpc_success", duration=duration)
     return j["result"]
 
 # ---- Models ----
@@ -229,6 +290,7 @@ def health():
 
 @app.post("/orders", response_model=CreateOrderRes, dependencies=[Depends(require_api_key)])
 def create_order(body: CreateOrderReq):
+    order_id_var.set(body.order_id)
     existing = db.get_order(body.order_id)
     if existing:
         addr = rpc("deriveaddresses", [existing["descriptor"], [existing["index"], existing["index"]]])[0]
@@ -262,6 +324,7 @@ def create_order(body: CreateOrderReq):
 
 @app.get("/orders/{order_id}/status", response_model=StatusRes, dependencies=[Depends(require_api_key)])
 def order_status(order_id: str):
+    order_id_var.set(order_id)
     meta = db.get_order(order_id)
     if not meta:
         return StatusRes(state="awaiting_deposit")
@@ -292,6 +355,7 @@ def order_status(order_id: str):
 
 @app.post("/psbt/build", response_model=PSBTRes, dependencies=[Depends(require_api_key)])
 def psbt_build(body: PSBTBuildReq):
+    order_id_var.set(body.order_id)
     meta = db.get_order(body.order_id)
     if not meta:
         raise HTTPException(404, "order not found")
@@ -311,6 +375,7 @@ def psbt_merge(body: MergeReq):
         raise HTTPException(400, "no partials")
     merged_list = body.partials
     if body.order_id:
+        order_id_var.set(body.order_id)
         existing = db.get_order(body.order_id)
         if not existing:
             raise HTTPException(404, "order not found")
@@ -334,6 +399,7 @@ def psbt_decode(body: DecodeReq):
 @app.post("/psbt/finalize", dependencies=[Depends(require_api_key)])
 def psbt_finalize(body: FinalizeReq):
     if body.order_id:
+        order_id_var.set(body.order_id)
         meta = db.get_order(body.order_id)
         if not meta:
             raise HTTPException(404, "order not found")
@@ -348,6 +414,8 @@ def psbt_finalize(body: FinalizeReq):
 
 @app.post("/tx/broadcast", dependencies=[Depends(require_api_key)])
 def tx_broadcast(body: BroadcastReq):
+    if body.order_id:
+        order_id_var.set(body.order_id)
     txid = rpc("sendrawtransaction", [body.hex])
     if body.order_id:
         meta = db.get_order(body.order_id)
@@ -364,6 +432,7 @@ def tx_broadcast(body: BroadcastReq):
 
 @app.post("/tx/bumpfee", dependencies=[Depends(require_api_key)])
 def tx_bumpfee(body: BumpFeeReq):
+    order_id_var.set(body.order_id)
     meta = db.get_order(body.order_id)
     if not meta or not meta.get("payout_txid"):
         raise HTTPException(404, "txid not found")
