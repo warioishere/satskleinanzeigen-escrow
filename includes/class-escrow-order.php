@@ -108,6 +108,14 @@ class WEO_Order {
     }
     echo '</ol>';
 
+    echo '<ol class="weo-flow">';
+    echo '<li>'.esc_html__('Betrag an die folgende Escrow-Adresse senden.', 'weo').'</li>';
+    echo '<li>'.esc_html__('Verkäufer markiert Versand, Käufer bestätigt den Empfang.', 'weo').'</li>';
+    echo '<li>'.esc_html__('Beide Parteien erstellen eine PSBT, signieren sie und laden sie hoch.', 'weo').'</li>';
+    echo '</ol>';
+    $doc_url = esc_url(plugins_url('docs/woo-user-guide.md', WEO_PLUGIN_FILE));
+    echo '<p><a href="'.$doc_url.'" target="_blank" rel="noopener">'.esc_html__('Zur ausführlichen Anleitung', 'weo').'</a></p>';
+
     // Adresse + QR + Copy
     $addr_esc = esc_html($addr);
     $addr_js  = esc_js($addr);
@@ -147,6 +155,8 @@ class WEO_Order {
     $received = intval($order->get_meta('_weo_received'));
     echo '<p>Versand: ' . ($shipped ? date_i18n(get_option('date_format'), $shipped) : 'noch nicht bestätigt') . '</p>';
     echo '<p>Empfang: ' . ($received ? date_i18n(get_option('date_format'), $received) : 'noch nicht bestätigt') . '</p>';
+
+    echo '<p>'.esc_html__('Nach Versand und Empfang muss eine PSBT erstellt, von beiden Parteien signiert und hier hochgeladen werden.', 'weo').'</p>';
 
     $cur      = get_current_user_id();
     $buyer_id  = $order->get_user_id();
