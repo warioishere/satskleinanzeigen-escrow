@@ -51,6 +51,14 @@ def init_db():
     conn.close()
 
 
+def next_index() -> int:
+    conn = get_conn()
+    cur = conn.execute("SELECT MAX(index) FROM orders")
+    row = cur.fetchone()
+    conn.close()
+    return (row[0] + 1) if row and row[0] is not None else 0
+
+
 def upsert_order(order_id: str, descriptor: str, index: int, min_conf: int, label: str, amount_sat: int):
     conn = get_conn()
     now = int(time.time())

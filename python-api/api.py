@@ -202,7 +202,7 @@ class CreateOrderReq(BaseModel):
     buyer: Party
     seller: Party
     escrow: Party
-    index: int = Field(..., ge=0)
+    index: Optional[int] = Field(None, ge=0)
     min_conf: int = Field(2, ge=0, le=100)
     amount_sat: int = Field(..., ge=0)
 
@@ -448,7 +448,8 @@ def create_order(body: CreateOrderReq):
             watch_id=f"escrow_{body.order_id}_{existing['index']}"
         )
 
-    desc = build_descriptor(body.buyer.xpub, body.seller.xpub, body.escrow.xpub, body.index)
+    idx = body.index if body.index is not None else db.next_index()
+    desc = build_descriptor(body.buyer.xpub, body.seller.xpub, body.escrow.xpub, idx)
     info = rpc("getdescriptorinfo", [desc])
     desc_ck = f"{desc}#{info['checksum']}"
     label = f"escrow:{body.order_id}"
@@ -459,15 +460,15 @@ def create_order(body: CreateOrderReq):
         "label": label,
         "internal": False,
         "active": False,
-        "range": [body.index, body.index]
+        "range": [idx, idx]
     }]])
-    addr = rpc("deriveaddresses", [desc_ck, [body.index, body.index]])[0]
+    addr = rpc("deriveaddresses", [desc_ck, [idx, idx]])[0]
 
-    db.upsert_order(body.order_id, desc_ck, body.index, body.min_conf, label, body.amount_sat)
+    db.upsert_order(body.order_id, desc_ck, idx, body.min_conf, label, body.amount_sat)
     return CreateOrderRes(
         escrow_address=addr,
         descriptor=desc_ck,
-        watch_id=f"escrow_{body.order_id}_{body.index}"
+        watch_id=f"escrow_{body.order_id}_{idx}"
     )
 
 @app.get("/orders/{order_id}/status", response_model=StatusRes, dependencies=[Depends(require_api_key)])

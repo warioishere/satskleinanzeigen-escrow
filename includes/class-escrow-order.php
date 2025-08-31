@@ -34,8 +34,6 @@ class WEO_Order {
     $amount_sat = intval( round( $total_btc * 100000000 ) );
     if (!weo_validate_amount($amount_sat)) $amount_sat = 0;
 
-    // deterministischer Index pro Order
-    $index   = abs(crc32('weo-'.$order->get_order_number())) % 1000000;
     $min_conf = intval(weo_get_option('min_conf',2));
 
     $oid = weo_sanitize_order_id((string)$order->get_order_number());
@@ -46,7 +44,6 @@ class WEO_Order {
       'buyer'      => ['xpub'=>$buyer_xpub],
       'seller'     => ['xpub'=>$vendor_xpub],
       'escrow'     => ['xpub'=>$escrow_xpub],
-      'index'      => $index,
       'min_conf'   => $min_conf
     ]);
 
@@ -490,40 +487,12 @@ class WEO_Order {
 
     $note = sanitize_textarea_field($_POST['weo_dispute_note'] ?? '');
 
-    $all_partials = array_merge(
-      (array)$order->get_meta('_weo_psbt_partials_buyer'),
-      (array)$order->get_meta('_weo_psbt_partials_seller')
-    );
-    $psbt = '';
     $oid = weo_sanitize_order_id((string)$order->get_order_number());
-    if ($all_partials) {
-      $merge = weo_api_post('/psbt/merge', [
-        'order_id' => $oid,
-        'partials' => $all_partials
-      ]);
-      if (!is_wp_error($merge) && !empty($merge['psbt'])) $psbt = $merge['psbt'];
-    }
-
-    if ($psbt) {
-      $final = weo_api_post('/psbt/finalize', [
-        'order_id' => $oid,
-        'psbt'     => $psbt,
-        'state'    => 'dispute'
-      ]);
-      if (!is_wp_error($final) && !empty($final['hex'])) {
-        weo_api_post('/tx/broadcast', [
-          'hex'      => $final['hex'],
-          'order_id' => $oid,
-          'state'    => 'dispute'
-        ]);
-      }
-    } else {
-      weo_api_post('/psbt/finalize', [
-        'order_id' => $oid,
-        'psbt'     => '',
-        'state'    => 'dispute'
-      ]);
-    }
+    weo_api_post('/psbt/finalize', [
+      'order_id' => $oid,
+      'psbt'     => '',
+      'state'    => 'dispute'
+    ]);
 
     $order->update_status('on-hold', 'Dispute eröffnet');
     $order->update_meta_data('_weo_dispute', current_time('mysql'));
