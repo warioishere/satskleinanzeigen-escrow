@@ -183,6 +183,9 @@ class WEO_Order {
     }
 
     $payout_txid = $order->get_meta('_weo_payout_txid');
+    if ($payout_txid) {
+      echo '<p>'.esc_html__('Auszahlungs-TXID','weo').': <code>'.esc_html($payout_txid).'</code></p>';
+    }
     if ($state === 'signing' || $payout_txid) {
       $nonce = wp_create_nonce('weo_psbt_'.$order_id);
       echo '<form method="post" action="" style="margin-top:10px;">';

@@ -208,6 +208,7 @@ class WEO_Dokan {
           'received'  => intval($order->get_meta('_weo_received')),
           'buyer_id'  => $order->get_user_id(),
           'vendor_id' => intval($order->get_meta('_weo_vendor_id')),
+          'payout_txid'=> $order->get_meta('_weo_payout_txid'),
           'role'      => 'vendor',
         ];
         $seen[$order->get_id()] = true;
@@ -236,6 +237,7 @@ class WEO_Dokan {
           'received'  => intval($order->get_meta('_weo_received')),
           'buyer_id'  => $order->get_user_id(),
           'vendor_id' => intval($order->get_meta('_weo_vendor_id')),
+          'payout_txid'=> $order->get_meta('_weo_payout_txid'),
           'role'      => 'buyer',
         ];
       }

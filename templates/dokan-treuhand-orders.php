@@ -17,6 +17,9 @@ if (!defined('ABSPATH')) exit;
       <?php else : ?>
         <p><?php esc_html_e('Noch keine Einzahlung erkannt.','weo'); ?></p>
       <?php endif; ?>
+      <?php if (!empty($o['payout_txid'])) : ?>
+        <p><?php esc_html_e('Auszahlungs-TXID','weo'); ?>: <code><?php echo esc_html($o['payout_txid']); ?></code></p>
+      <?php endif; ?>
       <?php if (!empty($o['addr'])) : ?>
         <p><strong><?php esc_html_e('Escrow-Adresse','weo'); ?>:</strong> <code id="weo_addr_<?php echo intval($o['id']); ?>"><?php echo esc_html($o['addr']); ?></code></p>
         <div class="weo-qr" id="weo_qr_<?php echo intval($o['id']); ?>" data-addr="<?php echo esc_attr($o['addr']); ?>"></div>
