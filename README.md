@@ -95,3 +95,30 @@ Configure the timeout period in two places:
 
 - Set the `SIGNING_DEADLINE_DAYS` environment variable for the API service.
 - In WordPress, adjust the **Signatur‑Timeout (Tage)** option under the plugin settings to match the server value.
+
+### Default escalation policy
+
+- If the buyer fails to sign within 7 days after the vendor marks the order as delivered, the escrow operator
+  may co‑sign with the vendor to complete the payout.
+- If the vendor does not deliver and remains inactive for 7 days, the escrow operator may co‑sign with the
+  buyer to refund the order.
+
+Admins can override deadlines or trigger payouts/refunds manually from the order panel if exceptional
+circumstances require intervention. Increase or decrease `SIGNING_DEADLINE_DAYS` on the server and in the
+plugin settings to customize the window for your shop.
+
+## FAQ
+
+### When does an escalation happen?
+The background worker checks `signing` orders against their `deadline_ts`. Once the timestamp has passed and
+only one signature is present, the API co‑signs and broadcasts the payout or refund automatically.
+
+### Can admins override the process?
+Yes. WordPress administrators can initiate payouts, refunds, or disputes directly from the order panel,
+which bypasses the automatic deadline handling.
+
+### Where can I find more documentation?
+- [API reference](docs/api.md)
+- [Operator guide](docs/operator-guide.md)
+- [WooCommerce user guide](docs/woo-user-guide.md)
+- [Sample Terms of Service clause](docs/terms-template.md)
