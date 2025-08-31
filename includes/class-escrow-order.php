@@ -186,13 +186,14 @@ class WEO_Order {
       $upload_url = esc_url(admin_url('admin-post.php'));
       $confirm = esc_js(__('Disput wirklich eröffnen? Die Bestellung wird in den Disput-Status versetzt und nur der Admin entscheidet über die Auszahlung.', 'weo'));
       echo '<form method="post" action="'.$upload_url.'" style="margin-top:10px;" onsubmit="return confirm(\''.$confirm.'\');">';
+      wp_nonce_field('weo_open_dispute_'.intval($order_id));
       echo '<input type="hidden" name="action" value="weo_open_dispute">';
       echo '<input type="hidden" name="order_id" value="'.intval($order_id).'">';
       echo '<p><label for="weo_dispute_note_'.intval($order_id).'">'.esc_html__('Problem beschreiben','weo').'</label><br/>';
       echo '<textarea name="weo_dispute_note" id="weo_dispute_note_'.intval($order_id).'" rows="4" style="width:100%"></textarea></p>';
       echo '<p><button class="button">'.esc_html__('Dispute eröffnen','weo').'</button></p>';
       echo '</form>';
-    }
+      }
 
     // PSBT-Flow wenn Escrow funded, Signing läuft oder Disput
     if (in_array($state, ['escrow_funded','signing','dispute'])) {
@@ -225,6 +226,7 @@ class WEO_Order {
 
       if ($cur && $cur == $buyer_id) {
         echo '<form method="post" action="'.$upload_url.'" style="margin-top:10px;">';
+        wp_nonce_field('weo_upload_psbt_'.intval($order_id));
         echo '<input type="hidden" name="action" value="weo_upload_psbt_buyer">';
         echo '<input type="hidden" name="order_id" value="'.intval($order_id).'">';
         echo '<p><label>Signierte PSBT (Base64, Käufer)</label><br/>';
@@ -235,6 +237,7 @@ class WEO_Order {
 
       if ($cur && $cur == $vendor_id) {
         echo '<form method="post" action="'.$upload_url.'" style="margin-top:10px;">';
+        wp_nonce_field('weo_upload_psbt_'.intval($order_id));
         echo '<input type="hidden" name="action" value="weo_upload_psbt_seller">';
         echo '<input type="hidden" name="order_id" value="'.intval($order_id).'">';
         echo '<p><label>Signierte PSBT (Base64, Verkäufer)</label><br/>';
@@ -425,6 +428,7 @@ class WEO_Order {
     $psbt     = trim(wp_unslash($_POST['weo_signed_psbt'] ?? ''));
     $action   = sanitize_text_field($_POST['action'] ?? '');
     if (!$order_id || !$psbt) wp_die('Fehlende Daten.');
+    if (!check_admin_referer('weo_upload_psbt_'.$order_id)) wp_die('Ungültiger Sicherheits-Token.');
 
     $order = wc_get_order($order_id); if (!$order) wp_die('Bestellung nicht gefunden.');
 
@@ -507,6 +511,7 @@ class WEO_Order {
     if (!is_user_logged_in()) wp_die('Nicht erlaubt.');
     $order_id = intval($_POST['order_id'] ?? 0);
     if (!$order_id) wp_die('Fehlende Order-ID.');
+    if (!check_admin_referer('weo_open_dispute_'.$order_id)) wp_die('Ungültiger Sicherheits-Token.');
     $order = wc_get_order($order_id); if (!$order) wp_die('Bestellung nicht gefunden.');
 
     $buyer_id  = $order->get_user_id();

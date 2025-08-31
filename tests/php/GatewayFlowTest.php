@@ -19,7 +19,7 @@ class GatewayFlowTest extends TestCase {
 
     public function test_handle_upload_workflow() {
         global $api_calls, $test_order;
-        $_POST = ['order_id'=>1, 'weo_signed_psbt'=>'part1', 'action'=>'weo_upload_psbt_buyer'];
+        $_POST = ['order_id'=>1, 'weo_signed_psbt'=>'part1', 'action'=>'weo_upload_psbt_buyer', '_wpnonce'=>'nonce'];
         try { (new WEO_Order())->handle_upload(); } catch (Exception $e) {}
         $paths = array_column($api_calls, 'path');
         $this->assertSame(['/psbt/merge','/psbt/decode','/psbt/finalize','/tx/broadcast'], $paths);
@@ -29,7 +29,7 @@ class GatewayFlowTest extends TestCase {
 
     public function test_open_dispute_calls_api() {
         global $api_calls, $test_order;
-        $_POST = ['order_id'=>1, 'weo_dispute_note'=>'problem'];
+        $_POST = ['order_id'=>1, 'weo_dispute_note'=>'problem', '_wpnonce'=>'nonce'];
         try { (new WEO_Order())->open_dispute(); } catch (Exception $e) {}
         $this->assertSame('/psbt/finalize', $api_calls[0]['path']);
         $this->assertSame('on-hold', $test_order->status);

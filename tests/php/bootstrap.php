@@ -34,6 +34,7 @@ function wc_add_notice($m,$t){}
 function wp_safe_redirect($u){throw new Exception('redirect');}
 function wp_get_referer(){return '/prev';}
 function wp_die($m){throw new Exception($m);}
+function check_admin_referer($a=-1,$q='_wpnonce'){return true;}
 function current_time($t){return time();}
 function wp_next_scheduled($h,$a=[]){return false;}
 function wp_schedule_single_event($ts,$h,$a=[]){ }
