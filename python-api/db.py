@@ -62,6 +62,19 @@ def get_order(order_id: str) -> Optional[Dict[str, Any]]:
     return dict(row) if row else None
 
 
+def get_partials(order_id: str) -> List[str]:
+    conn = get_conn()
+    cur = conn.execute("SELECT partials FROM orders WHERE order_id=?", (order_id,))
+    row = cur.fetchone()
+    conn.close()
+    if not row or not row["partials"]:
+        return []
+    try:
+        return json.loads(row["partials"])
+    except Exception:
+        return []
+
+
 def update_state(order_id: str, state: str):
     conn = get_conn()
     conn.execute("UPDATE orders SET state=? WHERE order_id=?", (state, order_id))

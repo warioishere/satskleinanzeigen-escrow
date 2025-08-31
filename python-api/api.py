@@ -132,12 +132,20 @@ def health():
 
 @app.post("/orders", response_model=CreateOrderRes, dependencies=[Depends(require_api_key)])
 def create_order(body: CreateOrderReq):
+    existing = db.get_order(body.order_id)
+    if existing:
+        addr = rpc("deriveaddresses", [existing["descriptor"], [existing["index"], existing["index"]]])[0]
+        return CreateOrderRes(
+            escrow_address=addr,
+            descriptor=existing["descriptor"],
+            watch_id=f"escrow_{body.order_id}_{existing['index']}"
+        )
+
     desc = build_descriptor(body.buyer.xpub, body.seller.xpub, body.escrow.xpub, body.index)
     info = rpc("getdescriptorinfo", [desc])
     desc_ck = f"{desc}#{info['checksum']}"
     label = f"escrow:{body.order_id}"
 
-    # enges Importfenster: nur dieser Index
     rpc("importdescriptors", [[{
         "desc": desc_ck,
         "timestamp": "now",
@@ -196,19 +204,31 @@ def psbt_build(body: PSBTBuildReq):
     ins = [{"txid": u["txid"], "vout": u["vout"]} for u in utxos]
     outs_btc: List[Dict[str,float]] = [{addr: sats/1e8} for addr, sats in body.outputs.items()]
     psbt = rpc("createpsbt", [ins, outs_btc, 0, True])
+    db.update_state(body.order_id, "signing")
     return PSBTRes(psbt=psbt)
 
 @app.post("/psbt/merge", response_model=PSBTRes, dependencies=[Depends(require_api_key)])
 def psbt_merge(body: MergeReq):
     if not body.partials:
         raise HTTPException(400, "no partials")
-    merged = rpc("combinepsbt", [body.partials])
+    merged_list = body.partials
     if body.order_id:
-        db.save_partials(body.order_id, body.partials)
+        existing = db.get_order(body.order_id)
+        if not existing:
+            raise HTTPException(404, "order not found")
+        prev = db.get_partials(body.order_id)
+        new_parts = [p for p in body.partials if p not in prev]
+        merged_list = prev + new_parts
+        db.save_partials(body.order_id, merged_list)
+    merged = rpc("combinepsbt", [merged_list])
     return PSBTRes(psbt=merged)
 
 @app.post("/psbt/finalize", dependencies=[Depends(require_api_key)])
 def psbt_finalize(body: FinalizeReq):
+    if body.order_id:
+        meta = db.get_order(body.order_id)
+        if not meta:
+            raise HTTPException(404, "order not found")
     fin = rpc("finalizepsbt", [body.psbt])
     if not fin.get("complete"):
         raise HTTPException(400, "not enough signatures")
@@ -218,5 +238,10 @@ def psbt_finalize(body: FinalizeReq):
 def tx_broadcast(body: BroadcastReq):
     txid = rpc("sendrawtransaction", [body.hex])
     if body.order_id:
-        woo_callback({"order_id": body.order_id, "event": "settled", "txid": txid})
+        meta = db.get_order(body.order_id)
+        if meta:
+            db.update_state(body.order_id, "completed")
+            if not meta.get("last_webhook_ts"):
+                woo_callback({"order_id": body.order_id, "event": "settled", "txid": txid})
+                db.set_last_webhook_ts(body.order_id, int(time.time()))
     return {"txid": txid}
