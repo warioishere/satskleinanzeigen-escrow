@@ -60,6 +60,23 @@ class WEO_Gateway extends WC_Payment_Gateway {
       'required'    => $required,
       'placeholder' => 'xpub... / zpub...'
     ], $value);
+
+    $addr_required = true;
+    $addr_value    = '';
+    if (is_user_logged_in()) {
+      $saved = get_user_meta(get_current_user_id(), 'weo_buyer_payout_address', true);
+      if (!empty($saved)) {
+        $addr_value    = $saved;
+        $addr_required = false;
+      }
+    }
+    woocommerce_form_field('_weo_buyer_payout_address', [
+      'type'        => 'text',
+      'class'       => ['form-row-wide'],
+      'label'       => 'Deine Refund-Adresse',
+      'required'    => $addr_required,
+      'placeholder' => 'bc1...'
+    ], $addr_value);
   }
 
   public function validate_fields() {
@@ -77,6 +94,22 @@ class WEO_Gateway extends WC_Payment_Gateway {
       return false;
     }
     $_POST['_weo_buyer_xpub'] = $norm;
+
+    $saved_addr = is_user_logged_in() ? get_user_meta(get_current_user_id(), 'weo_buyer_payout_address', true) : '';
+    $addr = wp_unslash($_POST['_weo_buyer_payout_address'] ?? '');
+    if (empty($addr)) {
+      if (empty($saved_addr)) {
+        wc_add_notice('Bitte Refund-Adresse angeben.', 'error');
+        return false;
+      }
+      $addr = $saved_addr;
+    }
+    if (!weo_validate_btc_address($addr)) {
+      wc_add_notice('Refund-Adresse ungültig.', 'error');
+      return false;
+    }
+    $_POST['_weo_buyer_payout_address'] = $addr;
+
     return true;
   }
 
@@ -88,6 +121,11 @@ class WEO_Gateway extends WC_Payment_Gateway {
     if ($xpub) {
       $order->update_meta_data('_weo_buyer_xpub', $xpub);
       $order->save();
+    }
+
+    $addr = weo_sanitize_btc_address(wp_unslash($_POST['_weo_buyer_payout_address'] ?? ''));
+    if ($addr && is_user_logged_in()) {
+      update_user_meta(get_current_user_id(), 'weo_buyer_payout_address', $addr);
     }
 
     if (class_exists('WEO_Order')) {

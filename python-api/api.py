@@ -3,7 +3,7 @@ from typing import Any, Dict, List, Optional
 from fastapi import FastAPI, HTTPException, Header, Depends, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import PlainTextResponse
-from pydantic import BaseModel, Field, validator, root_validator, constr
+from pydantic import BaseModel, Field, field_validator, constr
 import re, base64
 import requests
 from dotenv import load_dotenv
@@ -95,7 +95,7 @@ STATES = [
 
 STATE_TRANSITIONS = {
     "awaiting_deposit": {"escrow_funded"},
-    "escrow_funded": {"signing"},
+    "escrow_funded": {"signing", "dispute"},
     "signing": {"completed", "refunded", "dispute"},
     "completed": set(),
     "refunded": set(),
@@ -193,9 +193,9 @@ def rpc(method: str, params: List[Any] = None) -> Any:
 
 # ---- Models ----
 class Party(BaseModel):
-    xpub: constr(strip_whitespace=True, regex=r'^[A-Za-z0-9]+$')
+    xpub: constr(strip_whitespace=True, pattern=r'^[A-Za-z0-9]+$')
 
-OrderID = constr(regex=r'^[A-Za-z0-9_-]{1,32}$')
+OrderID = constr(pattern=r'^[A-Za-z0-9_-]{1,32}$')
 
 class CreateOrderReq(BaseModel):
     order_id: OrderID
@@ -222,7 +222,7 @@ class PSBTBuildReq(BaseModel):
     rbf: bool = True
     target_conf: int = Field(3, ge=1, le=100)
 
-    @validator('outputs')
+    @field_validator('outputs')
     def _check_outputs(cls, v):
         addr_re = re.compile(r'^(bc1|tb1)[0-9ac-hj-np-z]{8,87}$')
         for addr, amt in v.items():
@@ -234,12 +234,12 @@ class PSBTBuildReq(BaseModel):
 
 class PSBTRefundReq(BaseModel):
     order_id: OrderID
-    address: constr(strip_whitespace=True, regex=r'^(bc1|tb1)[0-9ac-hj-np-z]{8,87}$')
+    address: constr(strip_whitespace=True, pattern=r'^(bc1|tb1)[0-9ac-hj-np-z]{8,87}$')
     rbf: bool = True
     target_conf: int = Field(3, ge=1, le=100)
 
 class PayoutQuoteReq(BaseModel):
-    address: constr(strip_whitespace=True, regex=r'^(bc1|tb1)[0-9ac-hj-np-z]{8,87}$')
+    address: constr(strip_whitespace=True, pattern=r'^(bc1|tb1)[0-9ac-hj-np-z]{8,87}$')
     rbf: bool = True
     target_conf: int = Field(3, ge=1, le=100)
 
@@ -254,23 +254,24 @@ class MergeReq(BaseModel):
     order_id: Optional[OrderID] = None
     partials: List[str]
 
-    @validator('partials', each_item=True)
+    @field_validator('partials')
     def _check_part(cls, v):
-        try:
-            base64.b64decode(v, validate=True)
-        except Exception:
-            raise ValueError('invalid psbt fragment')
+        for item in v:
+            try:
+                base64.b64decode(item, validate=True)
+            except Exception:
+                raise ValueError('invalid psbt fragment')
         return v
 
 class FinalizeReq(BaseModel):
     order_id: Optional[OrderID] = None
     psbt: str
-    state: str = Field("completed", regex=r'^(completed|refunded|dispute)$')
+    state: str = Field("completed", pattern=r'^(completed|refunded|dispute)$')
 
 class BroadcastReq(BaseModel):
     hex: str
     order_id: Optional[OrderID] = None
-    state: str = Field("completed", regex=r'^(completed|refunded|dispute)$')
+    state: str = Field("completed", pattern=r'^(completed|refunded|dispute)$')
 
 class BumpFeeReq(BaseModel):
     order_id: OrderID
