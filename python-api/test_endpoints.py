@@ -104,6 +104,12 @@ def stub_rpc(method, params=None):
     return {}
 
 
+def stub_rpc_import_fail(method, params=None):
+    if method == 'importdescriptors':
+        return [{'success': False}]
+    return stub_rpc(method, params)
+
+
 def stub_utxos(label, min_conf):
     return [{'txid': 'tx1', 'vout': 0, 'amount': 0.000665}]
 
@@ -112,6 +118,29 @@ def stub_utxos_insuf(label, min_conf):
 
 def stub_utxos_short(label, min_conf):
     return [{'txid': 'tx1', 'vout': 0, 'amount': 0.0006}]
+
+
+def test_create_order_import_descriptor_failure(monkeypatch):
+    client = create_client(monkeypatch)
+    import python_api
+    import importlib
+    rpc_module = importlib.import_module('python_api.rpc')
+    orders_module = importlib.import_module('python_api.routes.orders')
+    monkeypatch.setattr(rpc_module, 'rpc', stub_rpc_import_fail)
+    monkeypatch.setattr(orders_module, 'rpc', stub_rpc_import_fail)
+    headers = {'x-api-key': 'testkey'}
+    body = {
+        'order_id': 'orderF',
+        'buyer': {'xpub': 'X'},
+        'seller': {'xpub': 'Y'},
+        'escrow': {'xpub': 'Z'},
+        'min_conf': 2,
+        'amount_sat': 60000,
+    }
+    r = client.post('/orders', json=body, headers=headers)
+    assert r.status_code == 500
+    import db
+    assert db.get_order('orderF') is None
 
 
 def test_payout_quote(monkeypatch):

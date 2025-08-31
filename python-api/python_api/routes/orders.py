@@ -45,7 +45,7 @@ def create_order(body: CreateOrderReq):
     except Exception:
         fee_est_sat = 0
 
-    rpc("importdescriptors", [[{
+    imp = rpc("importdescriptors", [[{
         "desc": desc_ck,
         "timestamp": "now",
         "label": label,
@@ -53,6 +53,8 @@ def create_order(body: CreateOrderReq):
         "active": False,
         "range": [idx, idx]
     }]])
+    if not imp or not imp[0].get("success"):
+        raise HTTPException(500, "descriptor import failed")
     addr = rpc("deriveaddresses", [desc_ck, [idx, idx]])[0]
 
     db.upsert_order(body.order_id, desc_ck, idx, body.min_conf, label, body.amount_sat, fee_est_sat)
