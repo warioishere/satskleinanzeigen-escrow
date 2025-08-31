@@ -20,6 +20,7 @@ require_once WEO_DIR.'includes/class-escrow-dokan.php';
 require_once WEO_DIR.'includes/class-escrow-checkout.php';
 require_once WEO_DIR.'includes/class-escrow-order.php';
 require_once WEO_DIR.'includes/class-escrow-rest.php';
+require_once WEO_DIR.'includes/class-escrow-admin.php';
 
 add_action('plugins_loaded', function() {
   if (!class_exists('WooCommerce')) return;
@@ -29,4 +30,5 @@ add_action('plugins_loaded', function() {
   new WEO_Checkout();
   new WEO_Order();
   new WEO_REST();
+  if (is_admin()) new WEO_Admin();
 });
