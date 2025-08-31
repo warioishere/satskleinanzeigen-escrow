@@ -249,7 +249,6 @@ class PayoutQuoteReq(BaseModel):
     target_conf: int = Field(3, ge=1, le=100)
 
 class PayoutQuoteRes(BaseModel):
-    payout_sat: int
     fee_sat: int
 
 class PSBTRes(BaseModel):
@@ -581,16 +580,18 @@ def payout_quote(order_id: str, body: PayoutQuoteReq):
         "conf_target": body.target_conf,
         "subtractFeeFromOutputs": [0],
     }
-    res = rpc("walletcreatefundedpsbt", [ins, {body.address: 0}, 0, opts])
-    if res.get("changepos", -1) != -1:
-        raise HTTPException(400, "unexpected change output")
+    outs = {body.address: meta["amount_sat"] / 1e8}
+    res = rpc("walletcreatefundedpsbt", [ins, outs, 0, opts])
     psbt = res.get("psbt")
     dec = rpc("decodepsbt", [psbt])
     vout0 = dec.get("tx", {}).get("vout", [{}])[0]
     payout_sat = int(round(vout0.get("value", 0) * 1e8))
-    in_total = sum(int(round(u.get("amount", 0) * 1e8)) for u in utxos)
-    fee_sat = in_total - payout_sat
-    return PayoutQuoteRes(payout_sat=payout_sat, fee_sat=fee_sat)
+    if payout_sat != meta["amount_sat"]:
+        raise HTTPException(400, "payout mismatch")
+    if res.get("changepos", -1) != -1:
+        raise HTTPException(400, "unexpected change output")
+    fee_sat = int(round(res.get("fee", 0) * 1e8))
+    return PayoutQuoteRes(fee_sat=fee_sat)
 
 @app.post("/psbt/build", response_model=PSBTRes, dependencies=[Depends(require_api_key)])
 def psbt_build(body: PSBTBuildReq):
@@ -603,6 +604,10 @@ def psbt_build(body: PSBTBuildReq):
         raise HTTPException(400, "no funded utxo")
 
     ins = [{"txid": u["txid"], "vout": u["vout"]} for u in utxos]
+    required = sum(body.outputs.values())
+    in_total = sum(int(round(u.get("amount", 0) * 1e8)) for u in utxos)
+    if in_total < required:
+        raise HTTPException(400, "insufficient funds")
     outs_btc = {addr: sats / 1e8 for addr, sats in body.outputs.items()}
     opts = {
         "includeWatching": True,
@@ -623,7 +628,10 @@ def psbt_build(body: PSBTBuildReq):
         addrs = o.get("scriptPubKey", {}).get("addresses", [])
         if len(addrs) != 1 or addrs[0] not in body.outputs:
             raise HTTPException(400, "outputs mismatch")
-        out_map[addrs[0]] = int(round(o.get("value", 0) * 1e8))
+        val_sat = int(round(o.get("value", 0) * 1e8))
+        if addrs[0] in body.outputs and val_sat != meta["amount_sat"]:
+            raise HTTPException(400, "payout mismatch")
+        out_map[addrs[0]] = val_sat
     db.set_outputs(body.order_id, out_map, "payout")
     advance_state(meta, "signing")
     return PSBTRes(psbt=psbt)

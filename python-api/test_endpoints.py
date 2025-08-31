@@ -67,18 +67,23 @@ def stub_rpc(method, params=None):
         if isinstance(outs, list):
             raise ValueError('outputs must be object')
         if outs == {'tb1qrefunded0': 0}:
-            return {'psbt':'psbtR','changepos':-1}
-        return {'psbt':'psbtP','changepos':-1}
+            return {'psbt': 'psbtR', 'changepos': -1, 'fee': 0.000065}
+        if outs == {'tb1qseller111': 0.0006}:
+            return {'psbt': 'psbtQ', 'changepos': -1, 'fee': 0.000065}
+        return {'psbt': 'psbtP', 'changepos': -1, 'fee': 0.000065}
     if method == 'decodepsbt':
-        psbt=params[0]
+        psbt = params[0]
         if not isinstance(psbt, str):
             raise ValueError('psbt must be str')
-        if psbt=='merged':
-            return {'tx':{'vin':[{'txid':'tx1','vout':0,'sequence':0xfffffffd}], 'vout':[{'value':0.00055,'scriptPubKey':{'addresses':['tb1qseller111']}}]}, 'inputs':[{'partial_signatures':{'a':'s','b':'s'}}]}
-        elif psbt=='psbtR':
-            return {'tx':{'vout':[{'value':0.00055,'scriptPubKey':{'addresses':['tb1qrefunded0']}}]}}
+        if psbt == 'merged':
+            return {
+                'tx': {'vin': [{'txid': 'tx1', 'vout': 0, 'sequence': 0xfffffffd}], 'vout': [{'value': 0.0006, 'scriptPubKey': {'addresses': ['tb1qseller111']}}]},
+                'inputs': [{'partial_signatures': {'a': 's', 'b': 's'}}]
+            }
+        elif psbt == 'psbtR':
+            return {'tx': {'vout': [{'value': 0.00055, 'scriptPubKey': {'addresses': ['tb1qrefunded0']}}]}}
         else:
-            return {'inputs':[{'partial_signatures':{'a':'s'}}], 'tx':{'vout':[{'value':0.00055,'scriptPubKey':{'addresses':['tb1qseller111']}}]}}
+            return {'inputs': [{'partial_signatures': {'a': 's'}}], 'tx': {'vout': [{'value': 0.0006, 'scriptPubKey': {'addresses': ['tb1qseller111']}}]}}
     if method == 'analyzepsbt':
         return {'fee':0.000065}
     if method == 'combinepsbt':
@@ -99,7 +104,10 @@ def stub_rpc(method, params=None):
 
 
 def stub_utxos(label, min_conf):
-    return [{'txid':'tx1','vout':0,'amount':0.000615}]
+    return [{'txid': 'tx1', 'vout': 0, 'amount': 0.000665}]
+
+def stub_utxos_insuf(label, min_conf):
+    return [{'txid': 'tx1', 'vout': 0, 'amount': 0.000615}]
 
 def stub_utxos_short(label, min_conf):
     return [{'txid': 'tx1', 'vout': 0, 'amount': 0.0006}]
@@ -120,7 +128,7 @@ def test_payout_quote(monkeypatch):
     assert status['fee_est_sat']==1500
     r=client.post('/orders/orderQ/payout_quote', json={'address':'tb1qseller111'}, headers=headers)
     assert r.status_code==200, r.text
-    assert r.json()=={'payout_sat':55000,'fee_sat':6500}
+    assert r.json()=={'fee_sat':6500}
 
 def test_full_payout_flow(monkeypatch):
     client=create_client(monkeypatch)
@@ -135,7 +143,12 @@ def test_full_payout_flow(monkeypatch):
     st=r.json()
     assert st['state']=='escrow_funded'
     assert st['fee_est_sat']==1500
-    r=client.post('/psbt/build', json={'order_id':'order1','outputs':{'tb1qseller111':55000}}, headers=headers)
+    r=client.post('/orders/order1/payout_quote', json={'address':'tb1qseller111'}, headers=headers)
+    assert r.status_code==200, r.text
+    quote = r.json()
+    assert quote['fee_sat']==6500
+    total = 60000 + quote['fee_sat']
+    r=client.post('/psbt/build', json={'order_id':'order1','outputs':{'tb1qseller111':total}}, headers=headers)
     assert r.status_code==200, r.text
     assert r.json()['psbt']=='psbtP'
     r=client.post('/psbt/merge', json={'order_id':'order1','partials':['cDE=','cDI=']}, headers=headers)
@@ -145,7 +158,7 @@ def test_full_payout_flow(monkeypatch):
     assert r.status_code==200, r.text
     dec=r.json()
     assert dec['sign_count']==2
-    assert dec['outputs']['tb1qseller111']==55000
+    assert dec['outputs']['tb1qseller111']==60000
     assert dec['fee_sat']==6500
     r=client.post('/psbt/finalize', json={'order_id':'order1','psbt':'merged','state':'completed'}, headers=headers)
     assert r.status_code==200, r.text
@@ -156,6 +169,23 @@ def test_full_payout_flow(monkeypatch):
     r=client.post('/tx/bumpfee', json={'order_id':'order1','target_conf':2}, headers=headers)
     assert r.status_code==200, r.text
     assert r.json()['txid']=='bumped'
+
+
+def test_payout_build_insufficient(monkeypatch):
+    client = create_client(monkeypatch)
+    import api
+    monkeypatch.setattr(api, 'rpc', stub_rpc)
+    monkeypatch.setattr(api, 'find_utxos_for_label', stub_utxos_insuf)
+    headers = {'x-api-key': 'testkey'}
+    body = {'order_id': 'orderI', 'buyer': {'xpub': 'X'}, 'seller': {'xpub': 'Y'}, 'escrow': {'xpub': 'Z'}, 'min_conf': 2, 'amount_sat': 60000}
+    r = client.post('/orders', json=body, headers=headers)
+    assert r.status_code == 200
+    r = client.post('/orders/orderI/payout_quote', json={'address': 'tb1qseller111'}, headers=headers)
+    assert r.status_code == 200
+    fee = r.json()['fee_sat']
+    total = 60000 + fee
+    r = client.post('/psbt/build', json={'order_id': 'orderI', 'outputs': {'tb1qseller111': total}}, headers=headers)
+    assert r.status_code == 400
 
 
 def test_refund_psbt(monkeypatch):
