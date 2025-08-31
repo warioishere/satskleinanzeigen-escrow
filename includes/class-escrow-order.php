@@ -471,6 +471,12 @@ class WEO_Order {
     $order->update_meta_data('_weo_psbt_sign_count', $signs);
     $order->save();
 
+    // Bei offenem Dispute keine Finalisierung/Broadcast
+    if ($order->get_meta('_weo_dispute')) {
+      wc_add_notice(__('Dispute offen – Auszahlung erfolgt erst nach Entscheidung des Administrators.','weo'), 'notice');
+      wp_safe_redirect(wp_get_referer()); exit;
+    }
+
     // Finalize
     $final = weo_api_post('/psbt/finalize', [
       'order_id' => $oid,

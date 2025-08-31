@@ -30,6 +30,7 @@ function is_user_logged_in(){return true;}
 function wp_unslash($v){return $v;}
 function sanitize_text_field($v){return $v;}
 function sanitize_textarea_field($v){return $v;}
+function __($text,$domain=null){return $text;}
 function wc_add_notice($m,$t){}
 function wp_safe_redirect($u){throw new Exception('redirect');}
 function wp_get_referer(){return '/prev';}
