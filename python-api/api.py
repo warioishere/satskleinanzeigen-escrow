@@ -26,6 +26,25 @@ WOO_HMAC_SECRET  = os.getenv("WOO_HMAC_SECRET", "")
 
 db.init_db()
 
+# ---- State machine ----
+STATES = [
+    "awaiting_deposit",
+    "escrow_funded",
+    "signing",
+    "completed",
+    "refunded",
+    "dispute",
+]
+
+STATE_TRANSITIONS = {
+    "awaiting_deposit": {"escrow_funded"},
+    "escrow_funded": {"signing"},
+    "signing": {"completed", "refunded", "dispute"},
+    "completed": set(),
+    "refunded": set(),
+    "dispute": set(),
+}
+
 # ---- FastAPI app ----
 app = FastAPI(title="Escrow API (2-of-3 P2WSH, PSBT)")
 app.add_middleware(
@@ -93,10 +112,12 @@ class MergeReq(BaseModel):
 class FinalizeReq(BaseModel):
     order_id: Optional[str] = None
     psbt: str
+    state: str = "completed"
 
 class BroadcastReq(BaseModel):
     hex: str
     order_id: Optional[str] = None
+    state: str = "completed"
 
 # ---- Helpers ----
 
@@ -119,6 +140,20 @@ def woo_callback(payload: Dict[str, Any]):
         }, timeout=10)
     except Exception:
         pass
+
+
+def advance_state(order: Dict[str, Any], new_state: str, confirmations: Optional[int] = None) -> bool:
+    cur = order.get("state") or "awaiting_deposit"
+    if new_state == cur:
+        if confirmations is not None:
+            db.update_state(order["order_id"], cur, confirmations)
+        return False
+    allowed = STATE_TRANSITIONS.get(cur, set())
+    if new_state not in allowed:
+        raise HTTPException(400, f"invalid state transition {cur}->{new_state}")
+    db.update_state(order["order_id"], new_state, confirmations)
+    order["state"] = new_state
+    return True
 
 def find_utxos_for_label(label: str, min_conf: int) -> List[Dict[str,Any]]:
     # listunspent ignoriert Label-Filter parameter in manchen Cores; wir filtern hier
@@ -170,16 +205,19 @@ def order_status(order_id: str):
         return StatusRes(state="awaiting_deposit")
     utxos = find_utxos_for_label(meta["label"], 0)
     if not utxos:
-        db.update_state(order_id, "awaiting_deposit")
-        return StatusRes(state="awaiting_deposit")
+        return StatusRes(state=meta["state"])
 
     # nimm größtes UTXO (oder summe, je nach Policy)
     u = sorted(utxos, key=lambda x: x.get("amount",0), reverse=True)[0]
     tx = rpc("gettransaction", [u["txid"]])
     confs = int(tx.get("confirmations", 0))
-    state = "escrow_funded" if confs >= int(meta["min_conf"]) else "awaiting_deposit"
     db.update_funding(order_id, u["txid"], u["vout"], confs)
-    db.update_state(order_id, state)
+    state = meta["state"]
+    if confs >= int(meta["min_conf"]):
+        changed = advance_state(meta, "escrow_funded", confs)
+        state = "escrow_funded"
+        if changed:
+            woo_callback({"order_id": order_id, "event":"escrow_funded", "txid": u["txid"], "confs": confs})
     res = StatusRes(
         funding={
             "txid": u["txid"], "vout": u["vout"],
@@ -188,8 +226,6 @@ def order_status(order_id: str):
         },
         state=state
     )
-    if state == "escrow_funded":
-        woo_callback({"order_id": order_id, "event":"escrow_funded", "txid": u["txid"], "confs": confs})
     return res
 
 @app.post("/psbt/build", response_model=PSBTRes, dependencies=[Depends(require_api_key)])
@@ -204,7 +240,7 @@ def psbt_build(body: PSBTBuildReq):
     ins = [{"txid": u["txid"], "vout": u["vout"]} for u in utxos]
     outs_btc: List[Dict[str,float]] = [{addr: sats/1e8} for addr, sats in body.outputs.items()]
     psbt = rpc("createpsbt", [ins, outs_btc, 0, True])
-    db.update_state(body.order_id, "signing")
+    advance_state(meta, "signing")
     return PSBTRes(psbt=psbt)
 
 @app.post("/psbt/merge", response_model=PSBTRes, dependencies=[Depends(require_api_key)])
@@ -232,6 +268,10 @@ def psbt_finalize(body: FinalizeReq):
     fin = rpc("finalizepsbt", [body.psbt])
     if not fin.get("complete"):
         raise HTTPException(400, "not enough signatures")
+    if body.order_id:
+        if body.state not in {"completed", "refunded", "dispute"}:
+            raise HTTPException(400, "invalid final state")
+        advance_state(meta, body.state)
     return {"hex": fin["hex"]}
 
 @app.post("/tx/broadcast", dependencies=[Depends(require_api_key)])
@@ -240,8 +280,11 @@ def tx_broadcast(body: BroadcastReq):
     if body.order_id:
         meta = db.get_order(body.order_id)
         if meta:
-            db.update_state(body.order_id, "completed")
+            if body.state not in {"completed", "refunded", "dispute"}:
+                raise HTTPException(400, "invalid final state")
+            advance_state(meta, body.state)
             if not meta.get("last_webhook_ts"):
-                woo_callback({"order_id": body.order_id, "event": "settled", "txid": txid})
+                event = "settled" if body.state == "completed" else body.state
+                woo_callback({"order_id": body.order_id, "event": event, "txid": txid})
                 db.set_last_webhook_ts(body.order_id, int(time.time()))
     return {"txid": txid}

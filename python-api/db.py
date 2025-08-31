@@ -75,9 +75,19 @@ def get_partials(order_id: str) -> List[str]:
         return []
 
 
-def update_state(order_id: str, state: str):
+def update_state(order_id: str, state: str, confirmations: Optional[int] = None):
     conn = get_conn()
-    conn.execute("UPDATE orders SET state=? WHERE order_id=?", (state, order_id))
+    now = int(time.time())
+    if confirmations is not None:
+        conn.execute(
+            "UPDATE orders SET state=?, confirmations=?, created_at=? WHERE order_id=?",
+            (state, confirmations, now, order_id),
+        )
+    else:
+        conn.execute(
+            "UPDATE orders SET state=?, created_at=? WHERE order_id=?",
+            (state, now, order_id),
+        )
     conn.commit()
     conn.close()
 
