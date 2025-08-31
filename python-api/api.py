@@ -11,6 +11,10 @@ import structlog
 from contextvars import ContextVar
 from starlette.middleware.base import BaseHTTPMiddleware
 from prometheus_client import Histogram, Counter, Gauge, generate_latest, CONTENT_TYPE_LATEST
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.util import get_remote_address
+from slowapi.errors import RateLimitExceeded
+from slowapi.middleware import SlowAPIMiddleware
 import db
 
 try:
@@ -40,6 +44,7 @@ STUCK_ORDER_HOURS = int(os.getenv("STUCK_ORDER_HOURS", "24"))
 STUCK_CHECK_INTERVAL = int(os.getenv("STUCK_CHECK_INTERVAL", "600"))
 SIGNING_DEADLINE_DAYS = int(os.getenv("SIGNING_DEADLINE_DAYS", "7"))
 SENTRY_DSN = os.getenv("SENTRY_DSN")
+RATE_LIMIT = os.getenv("RATE_LIMIT", "100/minute")
 if SENTRY_DSN and sentry_sdk:
     sentry_sdk.init(dsn=SENTRY_DSN)
 
@@ -105,6 +110,16 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+def _rate_limit_key(request: Request) -> str:
+    return request.headers.get("x-api-key") or get_remote_address(request)
+
+
+limiter = Limiter(key_func=_rate_limit_key, default_limits=[RATE_LIMIT])
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+app.add_middleware(SlowAPIMiddleware)
 
 
 class LoggingMiddleware(BaseHTTPMiddleware):
@@ -380,7 +395,7 @@ def find_utxos_for_label(label: str, min_conf: int) -> List[Dict[str,Any]]:
     return [u for u in utxos if (u.get("label") or "") == label]
 
 # ---- Routes ----
-@app.get("/health")
+@app.get("/health", dependencies=[Depends(require_api_key)])
 def health(response: Response):
     db_ok = True
     try:
@@ -403,7 +418,7 @@ def health(response: Response):
     return {"ok": ok, "db": db_ok, "rpc": rpc_ok, "webhook_queue": qlen}
 
 
-@app.get("/metrics")
+@app.get("/metrics", dependencies=[Depends(require_api_key)])
 def metrics():
     return PlainTextResponse(generate_latest(), media_type=CONTENT_TYPE_LATEST)
 
