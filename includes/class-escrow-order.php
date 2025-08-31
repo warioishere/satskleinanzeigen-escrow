@@ -254,21 +254,26 @@ class WEO_Order {
           echo '<div class="notice weo weo-error"><p>Fee-Bump fehlgeschlagen.</p></div>';
         }
       } else {
-        // Betrag: i. d. R. voller Escrow-Input – hier Order-Total in sats
-        $amount_sats = intval(round($order->get_total()*1e8));
-        if (!weo_validate_amount($amount_sats)) {
-          echo '<div class="notice weo weo-error"><p>Betrag ungültig.</p></div>';
-          return;
-        }
-
+        $oid = weo_sanitize_order_id((string)$order->get_order_number());
         if ($_POST['weo_action'] === 'build_psbt_payout') {
+          // Betrag: i. d. R. voller Escrow-Input – hier Order-Total in sats
+          $amount_sats = intval(round($order->get_total()*1e8));
+          if (!weo_validate_amount($amount_sats)) {
+            echo '<div class="notice weo weo-error"><p>Betrag ungültig.</p></div>';
+            return;
+          }
           $payoutAddr = get_user_meta($order->get_meta('_weo_vendor_id'), 'weo_vendor_payout_address', true);
           if (!$payoutAddr) $payoutAddr = $this->fallback_vendor_payout_address($order_id);
           if (!weo_validate_btc_address($payoutAddr)) {
             echo '<div class="notice weo weo-error"><p>Payout-Adresse ungültig.</p></div>';
             return;
           }
-          $outputs = [ $payoutAddr => $amount_sats ];
+          $resp = weo_api_post('/psbt/build', [
+            'order_id'    => $oid,
+            'outputs'     => [ $payoutAddr => $amount_sats ],
+            'rbf'         => true,
+            'target_conf' => 3
+          ]);
         } elseif ($_POST['weo_action'] === 'build_psbt_refund') {
           $refundAddr = get_user_meta($order->get_user_id(), 'weo_buyer_payout_address', true);
           if (!$refundAddr) {
@@ -279,26 +284,20 @@ class WEO_Order {
             echo '<div class="notice weo weo-error"><p>Adresse ungültig.</p></div>';
             return;
           }
-          $outputs = [ $refundAddr => $amount_sats ];
-        } else {
-          $outputs = [];
-        }
-
-        if ($outputs) {
-          $oid = weo_sanitize_order_id((string)$order->get_order_number());
-          $resp = weo_api_post('/psbt/build', [
+          $resp = weo_api_post('/psbt/build_refund', [
             'order_id'    => $oid,
-            'outputs'     => $outputs,
-            'rbf'         => true,
+            'address'     => $refundAddr,
             'target_conf' => 3
           ]);
+        } else {
+          $resp = null;
+        }
 
-          if (!is_wp_error($resp) && !empty($resp['psbt'])) {
-            $psbt_b64 = esc_textarea($resp['psbt']);
-            echo '<div class="notice weo weo-info"><p><strong>PSBT (Base64):</strong></p><textarea rows="6" style="width:100%;">'.$psbt_b64.'</textarea><p>Bitte in deiner Wallet laden, signieren und unten wieder hochladen.</p></div>';
-          } else {
-            echo '<div class="notice weo weo-error"><p>PSBT konnte nicht erstellt werden.</p></div>';
-          }
+        if (!empty($resp) && !is_wp_error($resp) && !empty($resp['psbt'])) {
+          $psbt_b64 = esc_textarea($resp['psbt']);
+          echo '<div class="notice weo weo-info"><p><strong>PSBT (Base64):</strong></p><textarea rows="6" style="width:100%;">'.$psbt_b64.'</textarea><p>Bitte in deiner Wallet laden, signieren und unten wieder hochladen.</p></div>';
+        } elseif ($resp !== null) {
+          echo '<div class="notice weo weo-error"><p>PSBT konnte nicht erstellt werden.</p></div>';
         }
       }
     }

@@ -213,6 +213,12 @@ class PSBTBuildReq(BaseModel):
                 raise ValueError('invalid amount')
         return v
 
+class PSBTRefundReq(BaseModel):
+    order_id: OrderID
+    address: constr(strip_whitespace=True, regex=r'^(bc1|tb1)[0-9ac-hj-np-z]{8,87}$')
+    rbf: bool = True
+    target_conf: int = Field(3, ge=1, le=100)
+
 class PSBTRes(BaseModel):
     psbt: str
 
@@ -448,6 +454,38 @@ def psbt_build(body: PSBTBuildReq):
     outs_btc: List[Dict[str,float]] = [{addr: sats/1e8} for addr, sats in body.outputs.items()]
     psbt = rpc("createpsbt", [ins, outs_btc, 0, True])
     db.set_outputs(body.order_id, body.outputs)
+    advance_state(meta, "signing")
+    return PSBTRes(psbt=psbt)
+
+@app.post("/psbt/build_refund", response_model=PSBTRes, dependencies=[Depends(require_api_key)])
+def psbt_build_refund(body: PSBTRefundReq):
+    order_id_var.set(body.order_id)
+    meta = db.get_order(body.order_id)
+    if not meta:
+        raise HTTPException(404, "order not found")
+    utxos = find_utxos_for_label(meta["label"], int(meta["min_conf"]))
+    if not utxos:
+        raise HTTPException(400, "no funded utxo")
+    ins = [{"txid": u["txid"], "vout": u["vout"]} for u in utxos]
+    opts = {
+        "includeWatching": True,
+        "replaceable": body.rbf,
+        "conf_target": body.target_conf,
+        "subtractFeeFromOutputs": [0],
+    }
+    res = rpc("walletcreatefundedpsbt", [ins, {body.address: 0}, 0, opts])
+    if res.get("changepos", -1) != -1:
+        raise HTTPException(400, "unexpected change output")
+    psbt = res.get("psbt")
+    dec = rpc("decodepsbt", [psbt])
+    outs = dec.get("tx", {}).get("vout", [])
+    if len(outs) != 1:
+        raise HTTPException(400, "unexpected outputs")
+    addrs = outs[0].get("scriptPubKey", {}).get("addresses", [])
+    if len(addrs) != 1 or addrs[0] != body.address:
+        raise HTTPException(400, "outputs mismatch")
+    val_sat = int(round(outs[0].get("value", 0) * 1e8))
+    db.set_outputs(body.order_id, {body.address: val_sat})
     advance_state(meta, "signing")
     return PSBTRes(psbt=psbt)
 
