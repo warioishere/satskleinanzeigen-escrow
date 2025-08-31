@@ -8,7 +8,7 @@ The FastAPI service automatically exposes OpenAPI/Swagger documentation.
 To run the API locally and view the docs:
 
 ```bash
-uvicorn api:app --reload
+uvicorn python_api.main:app --reload
 # visit http://localhost:8000/docs
 ```
 

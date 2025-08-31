@@ -66,7 +66,7 @@ Load these variables via an environment file or a secret manager in production.
    Type=simple
    WorkingDirectory=/path/to/satskleinanzeigen-escrow/python-api
    EnvironmentFile=/etc/default/escrow-api
-   ExecStart=/path/to/satskleinanzeigen-escrow/python-api/venv/bin/uvicorn api:app --host 0.0.0.0 --port 8080
+   ExecStart=/path/to/satskleinanzeigen-escrow/python-api/venv/bin/uvicorn python_api.main:app --host 0.0.0.0 --port 8080
    Restart=on-failure
 
    [Install]
