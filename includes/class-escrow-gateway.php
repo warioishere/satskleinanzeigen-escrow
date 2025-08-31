@@ -15,6 +15,8 @@ class WEO_Gateway extends WC_Payment_Gateway {
     $this->description = $this->get_option('description');
 
     add_action('woocommerce_update_options_payment_gateways_' . $this->id, [$this, 'process_admin_options']);
+    add_action('woocommerce_thankyou_' . $this->id, [$this, 'thankyou_page']);
+    add_action('wp_enqueue_scripts', [$this, 'enqueue_assets']);
   }
 
   public function init_form_fields() {
@@ -88,11 +90,11 @@ class WEO_Gateway extends WC_Payment_Gateway {
       $order->save();
     }
 
-    $order->update_status('on-hold');
-
     if (class_exists('WEO_Order')) {
       WEO_Order::maybe_create_escrow($order_id, 'pending', 'on-hold', $order);
     }
+
+    $order->update_status('on-hold');
 
     WC()->cart->empty_cart();
 
@@ -100,5 +102,26 @@ class WEO_Gateway extends WC_Payment_Gateway {
       'result'   => 'success',
       'redirect' => $this->get_return_url($order)
     ];
+  }
+
+  public function thankyou_page($order_id) {
+    if (class_exists('WEO_Order')) {
+      WEO_Order::render_order_panel($order_id);
+    }
+  }
+
+  public function enqueue_assets() {
+    if (is_order_received_page()) {
+      $oid = absint(get_query_var('order-received'));
+    } elseif (is_account_page()) {
+      $oid = absint(get_query_var('view-order'));
+    } else {
+      return;
+    }
+    if (!$oid) return;
+    $order = wc_get_order($oid);
+    if (!$order || $order->get_payment_method() !== $this->id) return;
+    wp_enqueue_style('weo-css', WEO_URL.'assets/admin.css', [], '1.0');
+    wp_enqueue_script('weo-qr', WEO_URL.'assets/qr.min.js', [], '1.0', true);
   }
 }

@@ -3,11 +3,7 @@ if (!defined('ABSPATH')) exit;
 
 class WEO_Order {
   public function __construct() {
-    add_action('woocommerce_thankyou',        [$this,'render_order_panel'], 20);
     add_action('woocommerce_view_order',      [$this,'render_order_panel'], 20);
-
-    // Adresse/Watcher beim Statuswechsel anlegen (du kannst den Trigger anpassen)
-    add_action('woocommerce_order_status_changed', [$this,'maybe_create_escrow'],10,4);
 
     // Admin-Metabox
     add_action('add_meta_boxes', [$this,'metabox']);
@@ -16,20 +12,9 @@ class WEO_Order {
     add_action('admin_post_weo_upload_psbt_buyer',  [$this,'handle_upload']);
     add_action('admin_post_weo_upload_psbt_seller', [$this,'handle_upload']);
     add_action('admin_post_weo_open_dispute',       [$this,'open_dispute']);
-
-    // Assets
-    add_action('wp_enqueue_scripts', [$this,'enqueue_assets']);
   }
 
-  /** Frontend-CSS/JS laden (nur auf Bestellseiten) */
-  public function enqueue_assets() {
-    if (is_order_received_page() || is_account_page()) {
-      wp_enqueue_style('weo-css', WEO_URL.'assets/admin.css', [], '1.0');
-      wp_enqueue_script('weo-qr',  WEO_URL.'assets/qr.min.js', [], '1.0', true);
-    }
-  }
-
-  /** Beim Wechsel in on-hold (oder wie du willst) Escrow-Adresse erzeugen */
+  /** Escrow-Adresse erzeugen (z.B. beim Wechsel in on-hold) */
   public function maybe_create_escrow($order_id, $from, $to, $order) {
     if (!$order instanceof WC_Order) $order = wc_get_order($order_id);
     if (!$order) return;
@@ -73,6 +58,7 @@ class WEO_Order {
   /** Bestellpanel (Thankyou & "Bestellung ansehen") */
   public function render_order_panel($order_id) {
     $order = wc_get_order($order_id); if (!$order) return;
+    if ($order->get_payment_method() !== 'weo_gateway') return;
 
     $addr   = $order->get_meta('_weo_escrow_addr');
     $watch  = $order->get_meta('_weo_watch_id');
