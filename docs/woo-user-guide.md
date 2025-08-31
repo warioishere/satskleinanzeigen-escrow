@@ -7,6 +7,13 @@
 3. Copy the key and paste it into the plugin’s xpub field. The plugin normalizes Slip132
    prefixes automatically.
 
+## Funding the escrow
+
+When the payment panel appears, it shows the product price **plus** an estimated payout fee.
+Send this total amount so the seller receives the full price.  The fee is estimated using
+Bitcoin Core's `estimatesmartfee` and a typical payout transaction size, so the actual
+fee paid at broadcast time may differ slightly.
+
 ## Signing a PSBT
 
 1. Download the partially signed transaction (PSBT) from the order page after clicking

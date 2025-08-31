@@ -79,3 +79,12 @@ Load these variables via an environment file or a secret manager in production.
    ```
 
 Monitor logs and Prometheus metrics under `/metrics` to ensure the service operates correctly.
+
+## Fee handling
+
+Buyers are expected to deposit the product price **plus** an estimated payout fee.  When an
+order is created, the API calls Bitcoin Core's `estimatesmartfee` and multiplies the returned
+feerate by a typical payout transaction size to derive `fee_est_sat`.  The WordPress plugin
+displays the total escrow target (`amount_sat + fee_est_sat`) so the seller receives the
+full price.  Because feerates fluctuate, the final miner fee may differ slightly from the
+estimate; any difference is reconciled when the payout transaction is broadcast.
