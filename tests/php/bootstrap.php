@@ -16,9 +16,9 @@ function weo_get_option($k,$default=false){
 function weo_validate_amount($a){return $a>=0;}
 function weo_sanitize_order_id($oid){return $oid;}
 function weo_api_post($path,$body){
-    global $api_calls; $api_calls[]=['path'=>$path,'body'=>$body];
+    global $api_calls, $decode_signs; $api_calls[]=['path'=>$path,'body'=>$body];
     if($path==='/psbt/merge') return ['psbt'=>'merged'];
-    if($path==='/psbt/decode') return ['sign_count'=>1];
+    if($path==='/psbt/decode') return ['sign_count'=>$decode_signs ?? 1];
     if($path==='/psbt/finalize') return ['hex'=>'deadbeef'];
     if($path==='/tx/broadcast') return ['txid'=>'txid123'];
     if($path==='/orders') return ['escrow_address'=>'addr','watch_id'=>'watch'];

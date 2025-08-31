@@ -82,6 +82,9 @@ if (!defined('ABSPATH')) exit;
           <textarea name="weo_signed_psbt" id="weo_signed_psbt_<?php echo intval($o['id']); ?>" rows="6" style="width:100%" placeholder="PSBT..."></textarea>
         </div>
         <div class="dokan-form-group">
+          <label><input type="checkbox" name="weo_release_funds" value="1"> <?php esc_html_e('Freigabe der Escrow-Mittel bestätigen','weo'); ?></label>
+        </div>
+        <div class="dokan-form-group">
           <button type="submit" class="dokan-btn dokan-btn-theme"><?php esc_html_e('PSBT hochladen','weo'); ?></button>
         </div>
       </form>
@@ -94,6 +97,9 @@ if (!defined('ABSPATH')) exit;
         <div class="dokan-form-group">
           <label class="dokan-form-label" for="weo_signed_psbt_<?php echo intval($o['id']); ?>"><?php esc_html_e('Signierte PSBT (Base64)','weo'); ?></label>
           <textarea name="weo_signed_psbt" id="weo_signed_psbt_<?php echo intval($o['id']); ?>" rows="6" style="width:100%" placeholder="PSBT..."></textarea>
+        </div>
+        <div class="dokan-form-group">
+          <label><input type="checkbox" name="weo_release_funds" value="1"> <?php esc_html_e('Freigabe der Escrow-Mittel bestätigen','weo'); ?></label>
         </div>
         <div class="dokan-form-group">
           <button type="submit" class="dokan-btn dokan-btn-theme"><?php esc_html_e('PSBT hochladen','weo'); ?></button>

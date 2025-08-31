@@ -4,9 +4,10 @@ require_once __DIR__.'/bootstrap.php';
 
 class GatewayFlowTest extends TestCase {
     protected function setUp(): void {
-        global $api_calls, $test_order;
+        global $api_calls, $test_order, $decode_signs;
         $api_calls = [];
         $test_order = new FakeOrder();
+        $decode_signs = 1;
     }
 
     public function test_checkout_creates_escrow() {
@@ -18,8 +19,9 @@ class GatewayFlowTest extends TestCase {
     }
 
     public function test_handle_upload_workflow() {
-        global $api_calls, $test_order;
-        $_POST = ['order_id'=>1, 'weo_signed_psbt'=>'part1', 'action'=>'weo_upload_psbt_buyer', '_wpnonce'=>'nonce'];
+        global $api_calls, $test_order, $decode_signs;
+        $decode_signs = 2;
+        $_POST = ['order_id'=>1, 'weo_signed_psbt'=>'part1', 'action'=>'weo_upload_psbt_buyer', '_wpnonce'=>'nonce', 'weo_release_funds'=>1];
         try { (new WEO_Order())->handle_upload(); } catch (Exception $e) {}
         $paths = array_column($api_calls, 'path');
         $this->assertSame(['/psbt/merge','/psbt/decode','/psbt/finalize','/tx/broadcast'], $paths);

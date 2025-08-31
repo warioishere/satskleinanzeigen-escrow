@@ -245,6 +245,7 @@ class WEO_Order {
         echo '<input type="hidden" name="order_id" value="'.intval($order_id).'">';
         echo '<p><label>Signierte PSBT (Base64, Käufer)</label><br/>';
         echo '<textarea name="weo_signed_psbt" rows="6" style="width:100%" placeholder="PSBT…"></textarea></p>';
+        echo '<p><label><input type="checkbox" name="weo_release_funds" value="1"> '.esc_html__('Freigabe der Escrow-Mittel bestätigen','weo').'</label></p>';
         echo '<p><button class="button button-primary">PSBT hochladen</button></p>';
         echo '</form>';
       }
@@ -256,6 +257,7 @@ class WEO_Order {
         echo '<input type="hidden" name="order_id" value="'.intval($order_id).'">';
         echo '<p><label>Signierte PSBT (Base64, Verkäufer)</label><br/>';
         echo '<textarea name="weo_signed_psbt" rows="6" style="width:100%" placeholder="PSBT…"></textarea></p>';
+        echo '<p><label><input type="checkbox" name="weo_release_funds" value="1"> '.esc_html__('Freigabe der Escrow-Mittel bestätigen','weo').'</label></p>';
         echo '<p><button class="button button-primary">PSBT hochladen</button></p>';
         echo '</form>';
       }
@@ -437,15 +439,24 @@ class WEO_Order {
       wp_safe_redirect(wp_get_referer()); exit;
     }
 
+    // Auszahlen nur, wenn zwei Signaturen und Freigabe vorliegen
+    if ($signs < 2) {
+      wc_add_notice('Noch nicht genügend Signaturen – zweite Unterschrift erforderlich.', 'notice');
+      wp_safe_redirect(wp_get_referer()); exit;
+    }
+    if (empty($_POST['weo_release_funds'])) {
+      wc_add_notice(__('Bitte bestätige die Freigabe der Escrow-Mittel.','weo'), 'notice');
+      wp_safe_redirect(wp_get_referer()); exit;
+    }
+
     // Finalize
     $final = weo_api_post('/psbt/finalize', [
       'order_id' => $oid,
       'psbt'     => $merge['psbt']
     ]);
 
-    // Wenn noch nicht genug Signaturen da sind
     if (is_wp_error($final) || empty($final['hex'])) {
-      wc_add_notice('Noch nicht genügend Signaturen – zweite Unterschrift erforderlich.', 'notice');
+      wc_add_notice('Finalisierung fehlgeschlagen. Bitte später erneut versuchen.', 'error');
       wp_safe_redirect(wp_get_referer()); exit;
     }
 
