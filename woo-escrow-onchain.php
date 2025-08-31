@@ -16,6 +16,7 @@ define('WEO_OPT', 'weo_options'); // Optionen-Array
 require_once WEO_DIR.'includes/helpers.php';
 require_once WEO_DIR.'includes/class-escrow-settings.php';
 require_once WEO_DIR.'includes/class-escrow-vendor.php';
+require_once WEO_DIR.'includes/class-escrow-dokan.php';
 require_once WEO_DIR.'includes/class-escrow-checkout.php';
 require_once WEO_DIR.'includes/class-escrow-order.php';
 require_once WEO_DIR.'includes/class-escrow-rest.php';
@@ -24,6 +25,7 @@ add_action('plugins_loaded', function() {
   if (!class_exists('WooCommerce')) return;
   new WEO_Settings();
   new WEO_Vendor();
+  if (function_exists('dokan')) new WEO_Dokan();
   new WEO_Checkout();
   new WEO_Order();
   new WEO_REST();

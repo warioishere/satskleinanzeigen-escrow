@@ -2,6 +2,10 @@
 
 This project links a WooCommerce plugin with a Python FastAPI service to handle Bitcoin multisig escrow.
 
+## Vendor setup
+
+Dokan sellers can configure their escrow xpub under **Treuhand Service** in the vendor dashboard.
+
 ## API key management
 
 The API reads a comma-separated list of valid keys from the `API_KEYS` environment variable. You can revoke individual keys by listing them in `API_KEY_REVOKED`.
