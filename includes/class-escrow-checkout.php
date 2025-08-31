@@ -9,18 +9,32 @@ class WEO_Checkout {
   }
 
   public function field($checkout) {
+    $required = true;
+    $value = $checkout->get_value('_weo_buyer_xpub');
+    if (is_user_logged_in()) {
+      $vendor_xpub = get_user_meta(get_current_user_id(), 'weo_vendor_xpub', true);
+      if (!empty($vendor_xpub)) {
+        $value = $vendor_xpub;
+        $required = false;
+      }
+    }
     woocommerce_form_field('_weo_buyer_xpub', [
-      'type'=>'text','class'=>['form-row-wide'],
-      'label'=>'Dein Escrow-xpub (für Signatur der Freigabe/Refund)',
-      'required'=>true,
-      'placeholder'=>'xpub... / zpub...'
-    ], $checkout->get_value('_weo_buyer_xpub'));
+      'type' => 'text',
+      'class' => ['form-row-wide'],
+      'label' => 'Dein Escrow-xpub (für Signatur der Freigabe/Refund)',
+      'required' => $required,
+      'placeholder' => 'xpub... / zpub...'
+    ], $value);
   }
 
   public function validate() {
+    $vendor_xpub = is_user_logged_in() ? get_user_meta(get_current_user_id(), 'weo_vendor_xpub', true) : '';
     if (empty($_POST['_weo_buyer_xpub'])) {
-      wc_add_notice('Bitte Escrow-xpub angeben.', 'error');
-      return;
+      if (empty($vendor_xpub)) {
+        wc_add_notice('Bitte Escrow-xpub angeben.', 'error');
+        return;
+      }
+      $_POST['_weo_buyer_xpub'] = $vendor_xpub;
     }
     $norm = weo_normalize_xpub(wp_unslash($_POST['_weo_buyer_xpub']));
     if (is_wp_error($norm)) {
