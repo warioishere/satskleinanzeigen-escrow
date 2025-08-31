@@ -204,6 +204,7 @@ class CreateOrderReq(BaseModel):
     escrow: Party
     index: int = Field(..., ge=0)
     min_conf: int = Field(2, ge=0, le=100)
+    amount_sat: int = Field(..., ge=0)
 
 class CreateOrderRes(BaseModel):
     escrow_address: str
@@ -461,7 +462,7 @@ def create_order(body: CreateOrderReq):
     }]])
     addr = rpc("deriveaddresses", [desc_ck, [body.index, body.index]])[0]
 
-    db.upsert_order(body.order_id, desc_ck, body.index, body.min_conf, label)
+    db.upsert_order(body.order_id, desc_ck, body.index, body.min_conf, label, body.amount_sat)
     return CreateOrderRes(
         escrow_address=addr,
         descriptor=desc_ck,
@@ -500,7 +501,7 @@ def order_status(order_id: str):
 
     state = meta["state"]
     expected = int(meta.get("amount_sat") or 0)
-    if min_conf is not None and min_conf >= int(meta["min_conf"]) and total_sat >= expected:
+    if expected > 0 and min_conf is not None and min_conf >= int(meta["min_conf"]) and total_sat >= expected:
         changed = advance_state(meta, "escrow_funded", min_conf)
         state = "escrow_funded"
         if changed:

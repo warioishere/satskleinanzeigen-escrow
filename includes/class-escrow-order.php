@@ -29,8 +29,10 @@ class WEO_Order {
     if (!$buyer_xpub || !$vendor_xpub || !$escrow_xpub) return;
 
     // Betrag in sats (optional – reine Info für API; echtes UTXO-Tracking macht Core)
-    // Falls du fiat Preise nutzt, ersetz die Umrechnung hier sinnvoll (oder entferne amount_sat)
-    $amount_sat = 0;
+    // Der Shop muss in BTC rechnen – andernfalls hier eine passende Umrechnung ergänzen
+    $total_btc  = floatval($order->get_total());
+    $amount_sat = intval( round( $total_btc * 100000000 ) );
+    if (!weo_validate_amount($amount_sat)) $amount_sat = 0;
 
     // deterministischer Index pro Order
     $index   = abs(crc32('weo-'.$order->get_order_number())) % 1000000;
