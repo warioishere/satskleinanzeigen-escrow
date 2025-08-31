@@ -14,6 +14,7 @@ define('WEO_URL', plugin_dir_url(__FILE__));
 define('WEO_OPT', 'weo_options'); // Optionen-Array
 
 require_once WEO_DIR.'includes/helpers.php';
+require_once WEO_DIR.'includes/class-psbt.php';
 require_once WEO_DIR.'includes/class-escrow-settings.php';
 require_once WEO_DIR.'includes/class-escrow-vendor.php';
 require_once WEO_DIR.'includes/class-escrow-dokan.php';
