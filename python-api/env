@@ -8,6 +8,7 @@ BTC_CORE_WALLET=escrowwatch   # watch-only Descriptor-Wallet (vorher anlegen)
 PORT=8080
 API_KEY=supersecretapikey     # optional; leer lassen, wenn nicht nötig
 ALLOW_ORIGINS=https://shop.example.com,https://admin.example.com
+RATE_LIMIT=100/minute         # z.B. 100 Requests pro Minute
 
 # Woo-Callback (optional)
 WOO_CALLBACK_URL=https://shop.example.com/wp-json/weo/v1/webhook
