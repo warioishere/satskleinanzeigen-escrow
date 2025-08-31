@@ -508,6 +508,11 @@ class WEO_Order {
     }
 
     $order->update_status('on-hold', 'Dispute eröffnet');
+    $order->update_meta_data('_weo_dispute', current_time('mysql'));
+    $order->save();
+
+    do_action('weo_dispute_opened', $order);
+
     wp_safe_redirect(wp_get_referer()); exit;
   }
 
