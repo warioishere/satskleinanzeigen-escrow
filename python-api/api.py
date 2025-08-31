@@ -56,6 +56,7 @@ WEBHOOK_COUNTER = Counter('webhook_total', 'Webhook deliveries', ['status'])
 PENDING_SIG = Gauge('pending_signatures', 'Open PSBT signatures')
 STUCK_COUNTER = Counter('stuck_orders_total', 'Orders stuck beyond threshold', ['state'])
 BROADCAST_FAIL = Counter('broadcast_fail_total', 'Failed transaction broadcasts')
+WEBHOOK_QUEUE_SIZE = Gauge('webhook_queue_size', 'Pending webhooks in queue')
 
 
 def update_pending_gauge():
@@ -287,13 +288,16 @@ _webhook_q: queue.Queue = queue.Queue()
 def _webhook_worker():
     while True:
         payload = _webhook_q.get()
+        WEBHOOK_QUEUE_SIZE.set(_webhook_q.qsize())
         order_id = payload.get("order_id")
         if not order_id:
             _webhook_q.task_done()
+            WEBHOOK_QUEUE_SIZE.set(_webhook_q.qsize())
             continue
         meta = db.get_order(order_id)
         if payload.get("event") != "escrow_funded" and meta and meta.get("last_webhook_ts"):
             _webhook_q.task_done()
+            WEBHOOK_QUEUE_SIZE.set(_webhook_q.qsize())
             continue
         success = False
         for attempt in range(WEBHOOK_RETRIES):
@@ -319,11 +323,13 @@ def _webhook_worker():
         else:
             WEBHOOK_COUNTER.labels(status="error").inc()
         _webhook_q.task_done()
+        WEBHOOK_QUEUE_SIZE.set(_webhook_q.qsize())
 
 def woo_callback(payload: Dict[str, Any]):
     if not (WOO_CALLBACK_URL and WOO_HMAC_SECRET):
         return
     _webhook_q.put(payload)
+    WEBHOOK_QUEUE_SIZE.set(_webhook_q.qsize())
 
 
 def _stuck_worker():
@@ -395,6 +401,11 @@ def find_utxos_for_label(label: str, min_conf: int) -> List[Dict[str,Any]]:
     return [u for u in utxos if (u.get("label") or "") == label]
 
 # ---- Routes ----
+
+@app.get("/live")
+def live():
+    return {"ok": True}
+
 @app.get("/health", dependencies=[Depends(require_api_key)])
 def health(response: Response):
     db_ok = True
@@ -412,6 +423,7 @@ def health(response: Response):
         rpc_ok = False
 
     qlen = _webhook_q.qsize()
+    WEBHOOK_QUEUE_SIZE.set(qlen)
     ok = db_ok and rpc_ok
     if not ok:
         response.status_code = 503
