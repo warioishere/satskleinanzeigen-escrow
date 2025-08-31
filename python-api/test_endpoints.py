@@ -163,3 +163,25 @@ def test_refund_psbt(monkeypatch):
     r=client.post('/psbt/build_refund', json={'order_id':'order2','address':'tb1qrefunded0'}, headers=headers)
     assert r.status_code==200, r.text
     assert r.json()['psbt']=='psbtR'
+
+
+def test_psbt_decode_multi_input(monkeypatch):
+    client = create_client(monkeypatch)
+    import api
+
+    def stub_rpc_multi(method, params=None):
+        if method == 'decodepsbt' and params[0] == 'multi':
+            return {
+                'tx': {'vout': [{'value': 0.00055, 'scriptPubKey': {'addresses': ['tb1qseller111']}}]},
+                'inputs': [
+                    {'partial_signatures': {'a': 'sig'}},
+                    {'partial_signatures': {'b': 'sig', 'c': 'sig'}},
+                ],
+            }
+        return stub_rpc(method, params)
+
+    monkeypatch.setattr(api, 'rpc', stub_rpc_multi)
+    headers = {'x-api-key': 'testkey'}
+    r = client.post('/psbt/decode', json={'psbt': 'multi'}, headers=headers)
+    assert r.status_code == 200, r.text
+    assert r.json()['sign_count'] == 3

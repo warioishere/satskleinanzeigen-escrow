@@ -657,10 +657,7 @@ def psbt_decode(body: DecodeReq):
     ana = rpc("analyzepsbt", [body.psbt])
     fee_sat = int(round(ana.get("fee", 0) * 1e8)) if ana.get("fee") is not None else 0
     inputs = dec.get("inputs", [])
-    count = 0
-    if inputs:
-        sigs = inputs[0].get("partial_signatures") or {}
-        count = len(sigs)
+    count = sum(len(inp.get("partial_signatures") or {}) for inp in inputs)
     return DecodeRes(sign_count=count, outputs=outs, fee_sat=fee_sat)
 
 @app.post("/psbt/finalize", dependencies=[Depends(require_api_key)])
