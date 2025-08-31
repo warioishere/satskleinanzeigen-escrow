@@ -1,4 +1,4 @@
-import os, json, hmac, hashlib, time
+import os, json, hmac, hashlib, time, threading, queue
 from typing import Any, Dict, List, Optional
 from fastapi import FastAPI, HTTPException, Header, Depends
 from fastapi.middleware.cors import CORSMiddleware
@@ -23,6 +23,8 @@ if not _origins_env:
 ALLOW_ORIGINS    = [o.strip() for o in _origins_env.split(",") if o.strip()]
 WOO_CALLBACK_URL = os.getenv("WOO_CALLBACK_URL", "")
 WOO_HMAC_SECRET  = os.getenv("WOO_HMAC_SECRET", "")
+WEBHOOK_RETRIES  = int(os.getenv("WEBHOOK_RETRIES", "3"))
+WEBHOOK_BACKOFF  = float(os.getenv("WEBHOOK_BACKOFF", "2"))
 
 db.init_db()
 
@@ -54,6 +56,11 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+@app.on_event("startup")
+def _startup_worker():
+    if WOO_CALLBACK_URL and WOO_HMAC_SECRET:
+        threading.Thread(target=_webhook_worker, daemon=True).start()
 
 # ---- Simple API-Key dependency (optional) ----
 def require_api_key(x_api_key: Optional[str] = Header(None)):
@@ -119,28 +126,52 @@ class BroadcastReq(BaseModel):
     order_id: Optional[str] = None
     state: str = "completed"
 
+# ---- Webhook worker ----
+
+_webhook_q: queue.Queue = queue.Queue()
+
+def _webhook_worker():
+    while True:
+        payload = _webhook_q.get()
+        order_id = payload.get("order_id")
+        if not order_id:
+            _webhook_q.task_done()
+            continue
+        meta = db.get_order(order_id)
+        if payload.get("event") != "escrow_funded" and meta and meta.get("last_webhook_ts"):
+            _webhook_q.task_done()
+            continue
+        for attempt in range(WEBHOOK_RETRIES):
+            body = json.dumps(payload, separators=(",",":")).encode()
+            ts   = str(int(time.time()))
+            sig  = hmac.new(WOO_HMAC_SECRET.encode(), ts.encode() + body, hashlib.sha256).hexdigest()
+            try:
+                r = requests.post(WOO_CALLBACK_URL, data=body, headers={
+                    "content-type":"application/json",
+                    "x-weo-sign": sig,
+                    "x-weo-ts": ts
+                }, timeout=10)
+                if 200 <= r.status_code < 300:
+                    if payload.get("event") != "escrow_funded":
+                        db.set_last_webhook_ts(order_id, int(ts))
+                    break
+            except Exception:
+                pass
+            time.sleep(WEBHOOK_BACKOFF ** attempt)
+        _webhook_q.task_done()
+
+def woo_callback(payload: Dict[str, Any]):
+    if not (WOO_CALLBACK_URL and WOO_HMAC_SECRET):
+        return
+    _webhook_q.put(payload)
+
+
 # ---- Helpers ----
 
 def build_descriptor(xpub_b: str, xpub_s: str, xpub_e: str, index: int) -> str:
     # sortedmulti sortiert intern – Reihenfolge ist egal; wir geben sie wie geliefert weiter
     # Für MVP leiten wir Childs über /0/index ab
     return f"wsh(sortedmulti(2,{xpub_b}/0/{index},{xpub_s}/0/{index},{xpub_e}/0/{index}))"
-
-def woo_callback(payload: Dict[str, Any]):
-    if not (WOO_CALLBACK_URL and WOO_HMAC_SECRET):
-        return
-    body = json.dumps(payload, separators=(",",":")).encode()
-    ts   = str(int(time.time()))
-    sig  = hmac.new(WOO_HMAC_SECRET.encode(), ts.encode() + body, hashlib.sha256).hexdigest()
-    try:
-        requests.post(WOO_CALLBACK_URL, data=body, headers={
-            "content-type":"application/json",
-            "x-weo-sign": sig,
-            "x-weo-ts": ts
-        }, timeout=10)
-    except Exception:
-        pass
-
 
 def advance_state(order: Dict[str, Any], new_state: str, confirmations: Optional[int] = None) -> bool:
     cur = order.get("state") or "awaiting_deposit"
@@ -286,5 +317,4 @@ def tx_broadcast(body: BroadcastReq):
             if not meta.get("last_webhook_ts"):
                 event = "settled" if body.state == "completed" else body.state
                 woo_callback({"order_id": body.order_id, "event": event, "txid": txid})
-                db.set_last_webhook_ts(body.order_id, int(time.time()))
     return {"txid": txid}

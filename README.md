@@ -25,6 +25,10 @@ When the API calls back into WooCommerce it signs the JSON body together with a 
 - `x-weo-sign` is `HMAC_SHA256(secret, ts + body)`
 - Requests with missing, stale, or mismatched signatures are rejected with `401`
 
+Callbacks are delivered asynchronously with retry and exponential backoff. Configure `WEBHOOK_RETRIES` for the number of attempts
+and `WEBHOOK_BACKOFF` as the multiplier between retries (defaults: 3 retries, backoff 2). Successful final notifications record a
+timestamp in the `last_webhook_ts` column to prevent duplicate sends.
+
 ## CORS configuration
 
 The API enforces a strict origin whitelist. Set the `ALLOW_ORIGINS` environment
