@@ -64,6 +64,7 @@ function check_admin_referer($a=-1,$q='_wpnonce'){return true;}
 function current_time($t){return time();}
 function wp_next_scheduled($h,$a=[]){return false;}
 function wp_schedule_single_event($ts,$h,$a=[]){ global $scheduled; $scheduled[]=['ts'=>$ts,'hook'=>$h,'args'=>$a]; }
+function dokan_get_navigation_url($p){ return '/'.$p; }
 
 // Minimal WooCommerce replacements
 class WEO_Vendor{ public static function get_vendor_xpub_by_order($order_id){ return 'XSELLER'; } }
