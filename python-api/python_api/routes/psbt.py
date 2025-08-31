@@ -160,6 +160,7 @@ def psbt_finalize(body: FinalizeReq):
     if not body.psbt:
         if meta and body.state == "dispute":
             advance_state(meta, "dispute")
+            woo_callback({"event": "dispute_opened", "order_id": body.order_id})
             return {"hex": ""}
         raise HTTPException(400, "missing psbt")
 

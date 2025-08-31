@@ -42,7 +42,7 @@ class GatewayFlowTest extends TestCase {
         $decode_signs = 2;
         $test_order->update_meta_data('_weo_shipped', time());
         $test_order->update_meta_data('_weo_received', time());
-        $_POST = ['order_id'=>1, 'weo_signed_psbt'=>'part1', 'action'=>'weo_upload_psbt_buyer', '_wpnonce'=>'nonce', 'weo_release_funds'=>1];
+        $_POST = ['order_id'=>1, 'weo_signed_psbt'=>'cGFydDE=', 'action'=>'weo_upload_psbt_buyer', '_wpnonce'=>'nonce', 'weo_release_funds'=>1];
         try { (new WEO_Order())->handle_upload(); } catch (Exception $e) {}
         $paths = array_column($api_calls, 'path');
         $this->assertSame(['/psbt/merge','/psbt/decode','/psbt/finalize','/tx/broadcast'], $paths);
@@ -55,7 +55,7 @@ class GatewayFlowTest extends TestCase {
         $decode_signs = 2;
         $test_order->update_meta_data('_weo_shipped', time());
         $test_order->update_meta_data('_weo_received', time());
-        $_POST = ['order_id'=>1, 'weo_signed_psbt'=>'part1', 'action'=>'weo_upload_psbt_buyer', '_wpnonce'=>'nonce', 'weo_release_funds'=>1];
+        $_POST = ['order_id'=>1, 'weo_signed_psbt'=>'cGFydDE=', 'action'=>'weo_upload_psbt_buyer', '_wpnonce'=>'nonce', 'weo_release_funds'=>1];
         try { (new WEO_Order())->handle_upload(); } catch (Exception $e) {}
         $last = end($actions);
         $this->assertSame('weo_tx_broadcasted', $last['hook']);
@@ -67,7 +67,7 @@ class GatewayFlowTest extends TestCase {
         $test_order->update_meta_data('_weo_dispute', '2024-01-01 00:00:00');
         $test_order->update_meta_data('_weo_shipped', time());
         $test_order->update_meta_data('_weo_received', time());
-        $_POST = ['order_id'=>1, 'weo_signed_psbt'=>'part1', 'action'=>'weo_upload_psbt_buyer', '_wpnonce'=>'nonce'];
+        $_POST = ['order_id'=>1, 'weo_signed_psbt'=>'cGFydDE=', 'action'=>'weo_upload_psbt_buyer', '_wpnonce'=>'nonce'];
         try { (new WEO_Order())->handle_upload(); } catch (Exception $e) {}
         $paths = array_column($api_calls, 'path');
         $this->assertSame(['/psbt/merge','/psbt/decode'], $paths);
@@ -100,7 +100,7 @@ class GatewayFlowTest extends TestCase {
         $test_order->update_meta_data('_weo_dispute_outcome', 'refund');
         $test_order->update_meta_data('_weo_shipped', time());
         $test_order->update_meta_data('_weo_received', time());
-        $_POST = ['order_id'=>1,'weo_signed_psbt'=>'part1','action'=>'weo_upload_psbt_buyer','_wpnonce'=>'nonce','weo_release_funds'=>1];
+        $_POST = ['order_id'=>1,'weo_signed_psbt'=>'cGFydDE=','action'=>'weo_upload_psbt_buyer','_wpnonce'=>'nonce','weo_release_funds'=>1];
         try { (new WEO_Order())->handle_upload(); } catch (Exception $e) {}
         $this->assertSame('refunded', $test_order->status);
         $this->assertArrayNotHasKey('_weo_dispute_outcome', $test_order->meta);
@@ -144,7 +144,7 @@ class GatewayFlowTest extends TestCase {
         $api_failures['/psbt/finalize'] = new WP_Error('fail','nope');
         $test_order->update_meta_data('_weo_shipped', time());
         $test_order->update_meta_data('_weo_received', time());
-        $_POST = ['order_id'=>1,'weo_signed_psbt'=>'part1','action'=>'weo_upload_psbt_buyer','_wpnonce'=>'nonce','weo_release_funds'=>1];
+        $_POST = ['order_id'=>1,'weo_signed_psbt'=>'cGFydDE=','action'=>'weo_upload_psbt_buyer','_wpnonce'=>'nonce','weo_release_funds'=>1];
         try { (new WEO_Order())->handle_upload(); } catch (Exception $e) {}
         $paths = array_column($api_calls,'path');
         $this->assertNotContains('/tx/broadcast', $paths);
@@ -155,7 +155,7 @@ class GatewayFlowTest extends TestCase {
     public function test_handle_upload_requires_shipped_received() {
         global $api_calls, $test_order, $decode_signs, $notices;
         $decode_signs = 2;
-        $_POST = ['order_id'=>1,'weo_signed_psbt'=>'part1','action'=>'weo_upload_psbt_buyer','_wpnonce'=>'nonce','weo_release_funds'=>1];
+        $_POST = ['order_id'=>1,'weo_signed_psbt'=>'cGFydDE=','action'=>'weo_upload_psbt_buyer','_wpnonce'=>'nonce','weo_release_funds'=>1];
         try { (new WEO_Order())->handle_upload(); } catch (Exception $e) {}
         $paths = array_column($api_calls,'path');
         $this->assertSame(['/psbt/merge','/psbt/decode'], $paths);
@@ -169,5 +169,18 @@ class GatewayFlowTest extends TestCase {
         try { (new WEO_Order())->open_dispute(); } catch (Exception $e) {}
         $this->assertArrayHasKey('_weo_dispute', $test_order->meta);
         $this->assertSame('weo_retry_finalize_dispute', $scheduled[0]['hook']);
+    }
+
+    public function test_rest_dispute_opened_updates_order_status() {
+        global $test_order;
+        require_once __DIR__.'/../../includes/class-escrow-rest.php';
+        $rest = new WEO_REST();
+        $req = new class {
+            public function get_json_params() {
+                return ['order_id' => 1, 'event' => 'dispute_opened'];
+            }
+        };
+        $rest->handle($req);
+        $this->assertSame('on-hold', $test_order->status);
     }
 }
