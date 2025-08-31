@@ -87,6 +87,24 @@ class WEO_Order {
     $funding = is_wp_error($status) ? null : ($status['funding'] ?? null);
     $state   = is_wp_error($status) ? 'unknown' : ($status['state'] ?? 'unknown');
 
+    // Stepper
+    $labels = [
+      'awaiting_deposit' => 'Einzahlung offen',
+      'escrow_funded'    => 'Escrow gefundet',
+      'signing'          => 'Signierung',
+      'completed'        => 'Abgeschlossen',
+      'refunded'         => 'Erstattung',
+      'dispute'          => 'Disput'
+    ];
+    $final = in_array($state, ['completed','refunded','dispute']) ? $state : 'completed';
+    $sequence = ['awaiting_deposit','escrow_funded','signing',$final];
+    echo '<ol class="weo-stepper" data-state="'.esc_attr($state).'">';
+    foreach ($sequence as $s) {
+      $label = $labels[$s] ?? $s;
+      echo '<li data-step="'.esc_attr($s).'"><span>'.esc_html($label).'</span></li>';
+    }
+    echo '</ol>';
+
     // Adresse + QR + Copy
     $addr_esc = esc_html($addr);
     $addr_js  = esc_js($addr);
@@ -148,6 +166,18 @@ class WEO_Order {
             t.select(); document.execCommand('copy'); document.body.removeChild(t);
             btn.textContent = 'Kopiert!';
             setTimeout(function(){ btn.textContent = 'Adresse kopieren'; }, 1500);
+          });
+        }
+
+        var stepper = document.querySelector('.weo-stepper');
+        if (stepper) {
+          var state = stepper.dataset.state;
+          var steps = stepper.querySelectorAll('li');
+          var idx = Array.prototype.findIndex.call(steps, function(li){ return li.dataset.step === state; });
+          if (idx === -1) idx = 0;
+          steps.forEach(function(li,i){
+            if (i < idx) li.classList.add('done');
+            else if (i === idx) li.classList.add('current');
           });
         }
       } catch(e) {}
