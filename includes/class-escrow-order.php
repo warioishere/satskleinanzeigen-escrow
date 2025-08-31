@@ -90,6 +90,18 @@ class WEO_Order {
       $deadline = intval($status['deadline_ts'] ?? 0);
     }
 
+    $amount_sat = intval($status['amount_sat'] ?? 0);
+    $fee_est_sat = intval($status['fee_est_sat'] ?? 0);
+    $required = $amount_sat + $fee_est_sat;
+    $funded_total = intval($funding['total_sat'] ?? 0);
+    if ($required > 0) {
+      echo '<p>Erforderliche Einzahlung: '.esc_html($required).' sats</p>';
+      if ($funded_total < $required) {
+        $missing = $required - $funded_total;
+        echo '<div class="notice weo weo-warning"><p>Es fehlen '.esc_html($missing).' sats.</p></div>';
+      }
+    }
+
     // Stepper
     $labels = [
       'awaiting_deposit' => 'Einzahlung offen',

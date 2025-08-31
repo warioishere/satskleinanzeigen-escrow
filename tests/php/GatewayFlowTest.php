@@ -27,6 +27,16 @@ class GatewayFlowTest extends TestCase {
         $this->assertSame('addr', $test_order->get_meta('_weo_escrow_addr'));
     }
 
+    public function test_build_payout_psbt_adds_fee() {
+        global $api_calls, $api_returns, $api_get_returns, $test_order;
+        $api_get_returns['/orders/order1/status'] = ['funding'=>['total_sat'=>100001000]];
+        $api_returns['/orders/order1/payout_quote'] = ['fee_sat'=>1000];
+        $api_returns['/psbt/build'] = ['psbt'=>'raw'];
+        WEO_Psbt::build_payout_psbt(1);
+        $build = array_values(array_filter($api_calls, fn($c) => $c['path']==='/psbt/build'));
+        $this->assertSame(100001000, $build[0]['body']['outputs']['bc1qtestfallbackaddress000000000000000000000']);
+    }
+
     public function test_handle_upload_workflow() {
         global $api_calls, $test_order, $decode_signs;
         $decode_signs = 2;
@@ -101,7 +111,7 @@ class GatewayFlowTest extends TestCase {
         $test_order->update_meta_data('_weo_escrow_addr','addr');
         $test_order->update_meta_data('_weo_watch_id','watch');
         $test_order->update_meta_data('_weo_payout_txid','txid123');
-        $api_get_returns['/orders/order1/status'] = ['state'=>'completed'];
+        $api_get_returns['/orders/order1/status'] = ['state'=>'completed','amount_sat'=>100000000,'fee_est_sat'=>1000,'funding'=>['total_sat'=>100001000]];
         ob_start();
         (new WEO_Order())->render_order_panel(1);
         $html = ob_get_clean();
@@ -109,6 +119,23 @@ class GatewayFlowTest extends TestCase {
         $this->assertStringContainsString('Zum Treuhand-Dashboard', $html);
         $this->assertStringContainsString('/weo-treuhand-orders', $html);
         $this->assertStringContainsString('txid123', $html);
+    }
+
+    public function test_render_order_panel_warns_underfunded() {
+        global $api_get_returns, $test_order;
+        $test_order->update_meta_data('_weo_escrow_addr','addr');
+        $test_order->update_meta_data('_weo_watch_id','watch');
+        $api_get_returns['/orders/order1/status'] = [
+            'state'=>'awaiting_deposit',
+            'amount_sat'=>100000000,
+            'fee_est_sat'=>1000,
+            'funding'=>['total_sat'=>50000000]
+        ];
+        ob_start();
+        (new WEO_Order())->render_order_panel(1);
+        $html = ob_get_clean();
+        $this->assertStringContainsString('Erforderliche Einzahlung', $html);
+        $this->assertStringContainsString('Es fehlen', $html);
     }
 
     public function test_handle_upload_finalize_error_shows_notice() {

@@ -2,6 +2,7 @@
 define('ABSPATH','/');
 define('WEO_PLUGIN_FILE', __FILE__);
 require_once __DIR__ . '/../../includes/class-escrow-order.php';
+require_once __DIR__ . '/../../includes/class-psbt.php';
 
 // Basic hooks
 function add_action($hook,$cb,$prio=10){}
@@ -15,6 +16,8 @@ function esc_attr($t){return $t;}
 function esc_js($t){return $t;}
 function esc_url($t){return $t;}
 function __($t,$d=null){return $t;}
+function esc_textarea($t){return $t;}
+function number_format_i18n($n){return $n;}
 
 // Misc WP helpers
 function admin_url($p=''){return $p;}
@@ -33,6 +36,7 @@ function wc_get_order($id){ global $test_order; return $test_order; }
 function weo_get_option($k,$default=false){ if ($k==='escrow_xpub') return 'XESCROW'; if ($k==='min_conf') return 2; return $default; }
 function weo_validate_amount($a){return $a>=0;}
 function weo_sanitize_order_id($oid){return $oid;}
+function weo_validate_btc_address($addr){return true;}
 
 class WP_Error{ private $msg; public function __construct($c,$m){$this->msg=$m;} public function get_error_message(){return $this->msg;} }
 function is_wp_error($v){ return $v instanceof WP_Error; }
@@ -67,6 +71,7 @@ function wp_schedule_single_event($ts,$h,$a=[]){ global $scheduled; $scheduled[]
 function dokan_get_navigation_url($p){ return '/'.$p; }
 function wc_mail($to,$subject,$message){ global $mails; $mails[]=['to'=>$to,'subject'=>$subject,'message'=>$message]; }
 function get_userdata($id){ return (object)['user_email'=>'vendor'.$id.'@example.com']; }
+function get_user_meta($id,$key,$single=true){ return ''; }
 
 // Minimal WooCommerce replacements
 class WEO_Vendor{ public static function get_vendor_xpub_by_order($order_id){ return 'XSELLER'; } }
@@ -75,13 +80,14 @@ class FakeOrder{
   public $meta=['_weo_buyer_xpub'=>'XBUYER','_weo_vendor_id'=>6];
   public $status='';
   public $notes=[];
+  public $total=1;
   public function get_user_id(){return 5;}
   public function get_payment_method(){return 'weo_gateway';}
   public function get_meta($k){return $this->meta[$k]??null;}
   public function update_meta_data($k,$v){$this->meta[$k]=$v;}
   public function delete_meta_data($k){unset($this->meta[$k]);}
   public function save(){}
-  public function get_total(){return 1;}
+  public function get_total(){return $this->total;}
   public function get_order_number(){return 'order1';}
   public function get_billing_email(){return 'buyer@example.com';}
   public function update_status($s,$n){$this->status=$s; $this->notes[]=$n;}

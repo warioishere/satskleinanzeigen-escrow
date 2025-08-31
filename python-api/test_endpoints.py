@@ -12,12 +12,12 @@ def create_client(monkeypatch):
     import sqlite3, json, time
     def init_db():
         conn = sqlite3.connect(db_path); conn.row_factory=sqlite3.Row; cur = conn.cursor()
-        cur.execute("CREATE TABLE orders(order_id TEXT PRIMARY KEY, descriptor TEXT, idx INTEGER, min_conf INTEGER, label TEXT, amount_sat INTEGER, created_at INTEGER, state TEXT, funding_txid TEXT, vout INTEGER, confirmations INTEGER, partials TEXT, outputs TEXT, output_type TEXT, last_webhook_ts INTEGER, payout_txid TEXT, deadline_ts INTEGER)")
+        cur.execute("CREATE TABLE orders(order_id TEXT PRIMARY KEY, descriptor TEXT, idx INTEGER, min_conf INTEGER, label TEXT, amount_sat INTEGER, fee_est_sat INTEGER, created_at INTEGER, state TEXT, funding_txid TEXT, vout INTEGER, confirmations INTEGER, partials TEXT, outputs TEXT, output_type TEXT, last_webhook_ts INTEGER, payout_txid TEXT, deadline_ts INTEGER)")
         conn.commit(); conn.close()
     def next_index():
         conn = sqlite3.connect(db_path); conn.row_factory=sqlite3.Row; cur = conn.execute("SELECT MAX(idx) FROM orders"); row = cur.fetchone(); conn.close(); return (row[0]+1) if row and row[0] is not None else 0
-    def upsert_order(order_id, descriptor, index, min_conf, label, amount_sat):
-        conn = sqlite3.connect(db_path); conn.row_factory=sqlite3.Row; now = int(time.time()); conn.execute("INSERT OR REPLACE INTO orders(order_id, descriptor, idx, min_conf, label, amount_sat, created_at, state) VALUES(?,?,?,?,?,?,?,?)", (order_id, descriptor, index, min_conf, label, amount_sat, now, 'awaiting_deposit')); conn.commit(); conn.close()
+    def upsert_order(order_id, descriptor, index, min_conf, label, amount_sat, fee_est_sat):
+        conn = sqlite3.connect(db_path); conn.row_factory=sqlite3.Row; now = int(time.time()); conn.execute("INSERT OR REPLACE INTO orders(order_id, descriptor, idx, min_conf, label, amount_sat, fee_est_sat, created_at, state) VALUES(?,?,?,?,?,?,?,?,?)", (order_id, descriptor, index, min_conf, label, amount_sat, fee_est_sat, now, 'awaiting_deposit')); conn.commit(); conn.close()
     def get_order(order_id):
         conn = sqlite3.connect(db_path); conn.row_factory=sqlite3.Row; cur = conn.execute("SELECT * FROM orders WHERE order_id=?", (order_id,)); row = cur.fetchone(); conn.close(); return dict(row) if row else None
     def update_state(order_id, state, conf=None, deadline=None):
@@ -44,15 +44,16 @@ def create_client(monkeypatch):
     stub.count_pending_signatures=lambda:0
     stub.list_orders_by_states=lambda states: []
     sys.modules['db']=stub
-    sys.modules.pop('api', None)
+    for m in [k for k in list(sys.modules.keys()) if k.startswith('python_api')]:
+        sys.modules.pop(m, None)
     from prometheus_client import REGISTRY
     for c in list(REGISTRY._collector_to_names.keys()):
         try:
             REGISTRY.unregister(c)
         except Exception:
             pass
-    import api
-    return TestClient(api.app)
+    import python_api
+    return TestClient(python_api.app)
 
 
 def stub_rpc(method, params=None):
@@ -62,20 +63,30 @@ def stub_rpc(method, params=None):
         return [{'success':True}]
     if method == 'deriveaddresses':
         return ['tb1qaddr']
-    if method == 'createpsbt':
-        return 'psbt1'
     if method == 'walletcreatefundedpsbt':
-        return {'psbt':'psbtR','changepos':-1}
+        outs = params[1]
+        if isinstance(outs, list):
+            raise ValueError('outputs must be object')
+        if outs == {'tb1qrefunded0': 0}:
+            return {'psbt': 'psbtR', 'changepos': -1, 'fee': 0.000065}
+        if outs == {'tb1qseller111': 0.0006}:
+            return {'psbt': 'psbtQ', 'changepos': -1, 'fee': 0.000065}
+        return {'psbt': 'psbtP', 'changepos': -1, 'fee': 0.000065}
     if method == 'decodepsbt':
-        psbt=params[0]
-        if psbt=='merged':
-            return {'tx':{'vin':[{'txid':'tx1','vout':0,'sequence':0xfffffffd}], 'vout':[{'value':0.00055,'scriptPubKey':{'addresses':['tb1qseller111']}}]}, 'inputs':[{'partial_signatures':{'a':'s','b':'s'}}]}
-        elif psbt=='psbtR':
-            return {'tx':{'vout':[{'value':0.00055,'scriptPubKey':{'addresses':['tb1qrefunded0']}}]}}
+        psbt = params[0]
+        if not isinstance(psbt, str):
+            raise ValueError('psbt must be str')
+        if psbt == 'merged':
+            return {
+                'tx': {'vin': [{'txid': 'tx1', 'vout': 0, 'sequence': 0xfffffffd}], 'vout': [{'value': 0.0006, 'scriptPubKey': {'addresses': ['tb1qseller111']}}]},
+                'inputs': [{'partial_signatures': {'a': 's', 'b': 's'}}]
+            }
+        elif psbt == 'psbtR':
+            return {'tx': {'vout': [{'value': 0.00055, 'scriptPubKey': {'addresses': ['tb1qrefunded0']}}]}}
         else:
-            return {'inputs':[{'partial_signatures':{'a':'s'}}], 'tx':{'vout':[{'value':0.00055,'scriptPubKey':{'addresses':['tb1qseller111']}}]}}
+            return {'inputs': [{'partial_signatures': {'a': 's'}}], 'tx': {'vout': [{'value': 0.0006, 'scriptPubKey': {'addresses': ['tb1qseller111']}}]}}
     if method == 'analyzepsbt':
-        return {'fee':0.00005}
+        return {'fee':0.000065}
     if method == 'combinepsbt':
         return 'merged'
     if method == 'gettransaction':
@@ -88,27 +99,77 @@ def stub_rpc(method, params=None):
         return 'txid123'
     if method == 'bumpfee':
         return {'txid':'bumped'}
+    if method == 'estimatesmartfee':
+        return {'feerate':0.0001}
     return {}
 
 
 def stub_utxos(label, min_conf):
-    return [{'txid':'tx1','vout':0,'amount':0.0006}]
+    return [{'txid': 'tx1', 'vout': 0, 'amount': 0.000665}]
 
+def stub_utxos_insuf(label, min_conf):
+    return [{'txid': 'tx1', 'vout': 0, 'amount': 0.000615}]
+
+def stub_utxos_short(label, min_conf):
+    return [{'txid': 'tx1', 'vout': 0, 'amount': 0.0006}]
+
+
+def test_payout_quote(monkeypatch):
+    client=create_client(monkeypatch)
+    import python_api
+    import importlib
+    rpc_module = importlib.import_module('python_api.rpc')
+    orders_module = importlib.import_module('python_api.routes.orders')
+    psbt_module = importlib.import_module('python_api.routes.psbt')
+    admin_module = importlib.import_module('python_api.routes.admin')
+    monkeypatch.setattr(rpc_module, 'rpc', stub_rpc)
+    monkeypatch.setattr(python_api, 'rpc', stub_rpc)
+    monkeypatch.setattr(orders_module, 'rpc', stub_rpc)
+    monkeypatch.setattr(orders_module, 'find_utxos_for_label', stub_utxos)
+    monkeypatch.setattr(psbt_module, 'rpc', stub_rpc)
+    headers={'x-api-key':'testkey'}
+    body={'order_id':'orderQ','buyer':{'xpub':'X'},'seller':{'xpub':'Y'},'escrow':{'xpub':'Z'},'min_conf':2,'amount_sat':60000}
+    r=client.post('/orders', json=body, headers=headers)
+    assert r.status_code==200
+    r=client.get('/orders/orderQ/status', headers=headers)
+    status = r.json()
+    assert status['state']=='escrow_funded'
+    assert status['fee_est_sat']==1500
+    r=client.post('/orders/orderQ/payout_quote', json={'address':'tb1qseller111'}, headers=headers)
+    assert r.status_code==200, r.text
+    assert r.json()=={'fee_sat':6500}
 
 def test_full_payout_flow(monkeypatch):
     client=create_client(monkeypatch)
-    import api
-    monkeypatch.setattr(api, 'rpc', stub_rpc)
-    monkeypatch.setattr(api, 'find_utxos_for_label', stub_utxos)
+    import python_api
+    import importlib
+    rpc_module = importlib.import_module('python_api.rpc')
+    orders_module = importlib.import_module('python_api.routes.orders')
+    psbt_module = importlib.import_module('python_api.routes.psbt')
+    admin_module = importlib.import_module('python_api.routes.admin')
+    monkeypatch.setattr(rpc_module, 'rpc', stub_rpc)
+    monkeypatch.setattr(python_api, 'rpc', stub_rpc)
+    monkeypatch.setattr(orders_module, 'rpc', stub_rpc)
+    monkeypatch.setattr(orders_module, 'find_utxos_for_label', stub_utxos)
+    monkeypatch.setattr(psbt_module, 'rpc', stub_rpc)
+    monkeypatch.setattr(psbt_module, 'find_utxos_for_label', stub_utxos)
+    monkeypatch.setattr(admin_module, 'rpc', stub_rpc)
     headers={'x-api-key':'testkey'}
     body={'order_id':'order1','buyer':{'xpub':'X'},'seller':{'xpub':'Y'},'escrow':{'xpub':'Z'},'min_conf':2,'amount_sat':60000}
     r=client.post('/orders', json=body, headers=headers)
     assert r.status_code==200
     r=client.get('/orders/order1/status', headers=headers)
-    assert r.json()['state']=='escrow_funded'
-    r=client.post('/psbt/build', json={'order_id':'order1','outputs':{'tb1qseller111':55000}}, headers=headers)
+    st=r.json()
+    assert st['state']=='escrow_funded'
+    assert st['fee_est_sat']==1500
+    r=client.post('/orders/order1/payout_quote', json={'address':'tb1qseller111'}, headers=headers)
     assert r.status_code==200, r.text
-    assert r.json()['psbt']=='psbt1'
+    quote = r.json()
+    assert quote['fee_sat']==6500
+    total = 60000 + quote['fee_sat']
+    r=client.post('/psbt/build', json={'order_id':'order1','outputs':{'tb1qseller111':total}}, headers=headers)
+    assert r.status_code==200, r.text
+    assert r.json()['psbt']=='psbtP'
     r=client.post('/psbt/merge', json={'order_id':'order1','partials':['cDE=','cDI=']}, headers=headers)
     assert r.status_code==200, r.text
     assert r.json()['psbt']=='merged'
@@ -116,8 +177,8 @@ def test_full_payout_flow(monkeypatch):
     assert r.status_code==200, r.text
     dec=r.json()
     assert dec['sign_count']==2
-    assert dec['outputs']['tb1qseller111']==55000
-    assert dec['fee_sat']==5000
+    assert dec['outputs']['tb1qseller111']==60000
+    assert dec['fee_sat']==6500
     r=client.post('/psbt/finalize', json={'order_id':'order1','psbt':'merged','state':'completed'}, headers=headers)
     assert r.status_code==200, r.text
     assert r.json()['hex']=='deadbeef'
@@ -129,17 +190,183 @@ def test_full_payout_flow(monkeypatch):
     assert r.json()['txid']=='bumped'
 
 
+def test_payout_build_insufficient(monkeypatch):
+    client = create_client(monkeypatch)
+    import python_api
+    import importlib
+    rpc_module = importlib.import_module('python_api.rpc')
+    orders_module = importlib.import_module('python_api.routes.orders')
+    psbt_module = importlib.import_module('python_api.routes.psbt')
+    monkeypatch.setattr(rpc_module, 'rpc', stub_rpc)
+    monkeypatch.setattr(python_api, 'rpc', stub_rpc)
+    monkeypatch.setattr(orders_module, 'rpc', stub_rpc)
+    monkeypatch.setattr(orders_module, 'find_utxos_for_label', stub_utxos_insuf)
+    monkeypatch.setattr(psbt_module, 'rpc', stub_rpc)
+    monkeypatch.setattr(psbt_module, 'find_utxos_for_label', stub_utxos_insuf)
+    headers = {'x-api-key': 'testkey'}
+    body = {'order_id': 'orderI', 'buyer': {'xpub': 'X'}, 'seller': {'xpub': 'Y'}, 'escrow': {'xpub': 'Z'}, 'min_conf': 2, 'amount_sat': 60000}
+    r = client.post('/orders', json=body, headers=headers)
+    assert r.status_code == 200
+    r = client.post('/orders/orderI/payout_quote', json={'address': 'tb1qseller111'}, headers=headers)
+    assert r.status_code == 200
+    fee = r.json()['fee_sat']
+    total = 60000 + fee
+    r = client.post('/psbt/build', json={'order_id': 'orderI', 'outputs': {'tb1qseller111': total}}, headers=headers)
+    assert r.status_code == 400
+
+
 def test_refund_psbt(monkeypatch):
     client=create_client(monkeypatch)
-    import api
-    monkeypatch.setattr(api, 'rpc', stub_rpc)
-    monkeypatch.setattr(api, 'find_utxos_for_label', stub_utxos)
+    import python_api
+    import importlib
+    rpc_module = importlib.import_module('python_api.rpc')
+    orders_module = importlib.import_module('python_api.routes.orders')
+    psbt_module = importlib.import_module('python_api.routes.psbt')
+    monkeypatch.setattr(rpc_module, 'rpc', stub_rpc)
+    monkeypatch.setattr(python_api, 'rpc', stub_rpc)
+    monkeypatch.setattr(orders_module, 'rpc', stub_rpc)
+    monkeypatch.setattr(orders_module, 'find_utxos_for_label', stub_utxos)
+    monkeypatch.setattr(psbt_module, 'rpc', stub_rpc)
+    monkeypatch.setattr(psbt_module, 'find_utxos_for_label', stub_utxos)
     headers={'x-api-key':'testkey'}
     body={'order_id':'order2','buyer':{'xpub':'X'},'seller':{'xpub':'Y'},'escrow':{'xpub':'Z'},'min_conf':2,'amount_sat':60000}
     r=client.post('/orders', json=body, headers=headers)
     assert r.status_code==200
     r=client.get('/orders/order2/status', headers=headers)
-    assert r.json()['state']=='escrow_funded'
+    st=r.json()
+    assert st['state']=='escrow_funded'
+    assert st['fee_est_sat']==1500
     r=client.post('/psbt/build_refund', json={'order_id':'order2','address':'tb1qrefunded0'}, headers=headers)
     assert r.status_code==200, r.text
     assert r.json()['psbt']=='psbtR'
+
+
+def test_underfunded_deposit(monkeypatch):
+    client = create_client(monkeypatch)
+    import python_api
+    import importlib
+    rpc_module = importlib.import_module('python_api.rpc')
+    orders_module = importlib.import_module('python_api.routes.orders')
+    psbt_module = importlib.import_module('python_api.routes.psbt')
+    monkeypatch.setattr(rpc_module, 'rpc', stub_rpc)
+    monkeypatch.setattr(python_api, 'rpc', stub_rpc)
+    monkeypatch.setattr(orders_module, 'rpc', stub_rpc)
+    monkeypatch.setattr(orders_module, 'find_utxos_for_label', stub_utxos_short)
+    monkeypatch.setattr(psbt_module, 'rpc', stub_rpc)
+    monkeypatch.setattr(psbt_module, 'find_utxos_for_label', stub_utxos_short)
+    headers = {'x-api-key': 'testkey'}
+    body = {'order_id': 'orderU', 'buyer': {'xpub': 'X'}, 'seller': {'xpub': 'Y'}, 'escrow': {'xpub': 'Z'}, 'min_conf': 2, 'amount_sat': 60000}
+    r = client.post('/orders', json=body, headers=headers)
+    assert r.status_code == 200
+    r = client.get('/orders/orderU/status', headers=headers)
+    st = r.json()
+    assert st['state'] == 'awaiting_deposit'
+    assert st['funding']['total_sat'] == 60000
+    assert st['funding']['shortfall_sat'] == 1500
+
+
+def test_psbt_decode_multi_input(monkeypatch):
+    client = create_client(monkeypatch)
+    import python_api
+    import importlib
+    rpc_module = importlib.import_module('python_api.rpc')
+    orders_module = importlib.import_module('python_api.routes.orders')
+    psbt_module = importlib.import_module('python_api.routes.psbt')
+
+    def stub_rpc_multi(method, params=None):
+        if method == 'decodepsbt' and params[0] == 'multi':
+            return {
+                'tx': {'vout': [{'value': 0.00055, 'scriptPubKey': {'addresses': ['tb1qseller111']}}]},
+                'inputs': [
+                    {'partial_signatures': {'a': 'sig'}},
+                    {'partial_signatures': {'b': 'sig', 'c': 'sig'}},
+                ],
+            }
+        return stub_rpc(method, params)
+
+    monkeypatch.setattr(python_api, 'rpc', stub_rpc_multi)
+    monkeypatch.setattr(rpc_module, 'rpc', stub_rpc_multi)
+    monkeypatch.setattr(psbt_module, 'rpc', stub_rpc_multi)
+    headers = {'x-api-key': 'testkey'}
+    r = client.post('/psbt/decode', json={'psbt': 'multi'}, headers=headers)
+    assert r.status_code == 200, r.text
+    assert r.json()['sign_count'] == 3
+
+
+def test_stuck_worker_watch_only(monkeypatch):
+    client = create_client(monkeypatch)
+    import python_api
+    import python_api.workers as workers
+    import python_api.routes.psbt as psbt_routes
+    import python_api.routes.admin as admin_routes
+
+    order = {
+        'order_id': 'orderW',
+        'state': 'signing',
+        'deadline_ts': 1,
+        'created_at': 0,
+        'output_type': 'payout',
+    }
+
+    def list_orders(states):
+        return [order]
+
+    def get_partials(order_id):
+        return ['partial1']
+
+    def rpc_stub(method, params=None):
+        if method == 'combinepsbt':
+            return 'oneSig'
+        if method == 'walletprocesspsbt':
+            return {'psbt': 'oneSig'}
+        if method == 'decodepsbt':
+            return {'inputs': [{'partial_signatures': {'a': 'sig'}}]}
+        return stub_rpc(method, params)
+
+    finalize_called = []
+    broadcast_called = []
+
+    def finalize_stub(req):
+        finalize_called.append(req)
+        return {'hex': 'deadbeef', 'complete': True}
+
+    def broadcast_stub(req):
+        broadcast_called.append(req)
+        return {'txid': 'txid123'}
+
+    class Logger:
+        def __init__(self):
+            self.events = []
+            self.errors = []
+        def info(self, event, **kw):
+            self.events.append((event, kw))
+        def warning(self, *a, **kw):
+            pass
+        def error(self, event, **kw):
+            self.errors.append((event, kw))
+
+    logger = Logger()
+
+    monkeypatch.setattr(workers, 'rpc', rpc_stub)
+    monkeypatch.setattr(workers.db, 'list_orders_by_states', list_orders)
+    monkeypatch.setattr(workers.db, 'get_partials', get_partials)
+    monkeypatch.setattr(psbt_routes, 'psbt_finalize', finalize_stub)
+    monkeypatch.setattr(admin_routes, 'tx_broadcast', broadcast_stub)
+    monkeypatch.setattr(workers, 'log', logger)
+
+    def stop(*a, **kw):
+        raise SystemExit
+
+    monkeypatch.setattr(workers.time, 'sleep', stop)
+
+    try:
+        workers._stuck_worker()
+    except SystemExit:
+        pass
+
+    assert finalize_called == []
+    assert broadcast_called == []
+    assert logger.errors == []
+    assert ('watch_only_no_signatures', {'order_id': 'orderW', 'sign_count': 1}) in logger.events
+    assert ('deadline_escalation_skipped', {'order_id': 'orderW', 'sign_count': 1}) in logger.events
+    assert python_api.STUCK_COUNTER.labels(state='insufficient_signatures')._value.get() == 1
