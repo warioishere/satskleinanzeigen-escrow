@@ -50,12 +50,6 @@ if (!defined('ABSPATH')) exit;
           <button type="submit" class="dokan-btn"><?php esc_html_e('PSBT (Auszahlung an Verkäufer) erstellen','weo'); ?></button>
         </form>
         <?php endif; ?>
-        <form method="post" class="dokan-form" style="margin-top:10px;">
-          <input type="hidden" name="order_id" value="<?php echo intval($o['id']); ?>">
-          <input type="hidden" name="weo_nonce" value="<?php echo esc_attr($nonce); ?>">
-          <input type="hidden" name="weo_action" value="build_psbt_refund">
-          <button type="submit" class="dokan-btn"><?php esc_html_e('PSBT (Erstattung an Käufer) erstellen','weo'); ?></button>
-        </form>
       <?php endif; ?>
 
       <?php if ($o['role'] === 'vendor') : ?>

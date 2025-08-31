@@ -190,12 +190,14 @@ class WEO_Order {
         echo '</form>';
       }
 
-      // PSBT (Refund) erstellen
-      echo '<form method="post" action="" style="margin-top:10px;">';
-      echo '<input type="hidden" name="weo_action" value="build_psbt_refund">';
-      echo '<input type="hidden" name="weo_nonce" value="'.$nonce.'">';
-      echo '<p><button class="button">PSBT (Erstattung an Käufer) erstellen</button></p>';
-      echo '</form>';
+      // PSBT (Refund) nur für Admins erstellen
+      if (current_user_can('manage_options')) {
+        echo '<form method="post" action="" style="margin-top:10px;">';
+        echo '<input type="hidden" name="weo_action" value="build_psbt_refund">';
+        echo '<input type="hidden" name="weo_nonce" value="'.$nonce.'">';
+        echo '<p><button class="button">PSBT (Erstattung an Käufer) erstellen</button></p>';
+        echo '</form>';
+      }
 
       // Signierte PSBT hochladen (buyer)
       $upload_url = esc_url(admin_url('admin-post.php'));
@@ -351,6 +353,10 @@ class WEO_Order {
               'target_conf' => 3,
             ]);
           } elseif ($act === 'build_psbt_refund') {
+            if (!current_user_can('manage_options')) {
+              echo '<div class="notice weo weo-error"><p>Keine Berechtigung.</p></div>';
+              return;
+            }
             $refundAddr = get_user_meta($order->get_user_id(), 'weo_buyer_payout_address', true);
             if (!$refundAddr) {
               echo '<div class="notice weo weo-error"><p>Keine Käuferadresse hinterlegt.</p></div>';
