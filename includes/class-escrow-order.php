@@ -279,23 +279,36 @@ class WEO_Order {
       } else {
         $oid = weo_sanitize_order_id((string)$order->get_order_number());
         if ($_POST['weo_action'] === 'build_psbt_payout') {
-          // Betrag: i. d. R. voller Escrow-Input – hier Order-Total in sats
-          $amount_sats = intval(round($order->get_total()*1e8));
-          if (!weo_validate_amount($amount_sats)) {
-            echo '<div class="notice weo weo-error"><p>Betrag ungültig.</p></div>';
-            return;
-          }
           $payoutAddr = get_user_meta($order->get_meta('_weo_vendor_id'), 'weo_vendor_payout_address', true);
           if (!$payoutAddr) $payoutAddr = $this->fallback_vendor_payout_address($order_id);
           if (!weo_validate_btc_address($payoutAddr)) {
             echo '<div class="notice weo weo-error"><p>Payout-Adresse ungültig.</p></div>';
             return;
           }
+          $status = weo_api_get('/orders/'.rawurlencode($oid).'/status');
+          $funded = is_wp_error($status) ? 0 : intval($status['funding']['total_sat'] ?? 0);
+          if ($funded <= 0) {
+            echo '<div class="notice weo weo-error"><p>Keine Escrow-Einzahlung gefunden.</p></div>';
+            return;
+          }
+          $quote = weo_api_post('/orders/'.rawurlencode($oid).'/payout_quote', [
+            'address'     => $payoutAddr,
+            'target_conf' => 3,
+          ]);
+          if (is_wp_error($quote) || empty($quote['payout_sat'])) {
+            echo '<div class="notice weo weo-error"><p>Fee-Kalkulation fehlgeschlagen.</p></div>';
+            return;
+          }
+          $amount_sats = intval($quote['payout_sat']);
+          if ($amount_sats <= 0 || !weo_validate_amount($amount_sats)) {
+            echo '<div class="notice weo weo-error"><p>Betrag ungültig.</p></div>';
+            return;
+          }
           $resp = weo_api_post('/psbt/build', [
             'order_id'    => $oid,
             'outputs'     => [ $payoutAddr => $amount_sats ],
             'rbf'         => true,
-            'target_conf' => 3
+            'target_conf' => 3,
           ]);
         } elseif ($_POST['weo_action'] === 'build_psbt_refund') {
           $refundAddr = get_user_meta($order->get_user_id(), 'weo_buyer_payout_address', true);

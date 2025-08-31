@@ -221,6 +221,15 @@ class PSBTRefundReq(BaseModel):
     rbf: bool = True
     target_conf: int = Field(3, ge=1, le=100)
 
+class PayoutQuoteReq(BaseModel):
+    address: constr(strip_whitespace=True, regex=r'^(bc1|tb1)[0-9ac-hj-np-z]{8,87}$')
+    rbf: bool = True
+    target_conf: int = Field(3, ge=1, le=100)
+
+class PayoutQuoteRes(BaseModel):
+    payout_sat: int
+    fee_sat: int
+
 class PSBTRes(BaseModel):
     psbt: str
 
@@ -487,6 +496,30 @@ def order_status(order_id: str):
     )
     return res
 
+@app.post("/orders/{order_id}/payout_quote", response_model=PayoutQuoteRes, dependencies=[Depends(require_api_key)])
+def payout_quote(order_id: str, body: PayoutQuoteReq):
+    order_id_var.set(order_id)
+    meta = db.get_order(order_id)
+    if not meta:
+        raise HTTPException(404, "order not found")
+    utxos = find_utxos_for_label(meta["label"], int(meta["min_conf"]))
+    if not utxos:
+        raise HTTPException(400, "no funded utxo")
+    ins = [{"txid": u["txid"], "vout": u["vout"]} for u in utxos]
+    opts = {
+        "includeWatching": True,
+        "replaceable": body.rbf,
+        "conf_target": body.target_conf,
+        "subtractFeeFromOutputs": [0],
+    }
+    psbt = rpc("walletcreatefundedpsbt", [ins, [{body.address: 0}], 0, opts])
+    dec = rpc("decodepsbt", [psbt])
+    vout0 = dec.get("tx", {}).get("vout", [{}])[0]
+    payout_sat = int(round(vout0.get("value", 0) * 1e8))
+    in_total = sum(int(round(u.get("amount", 0) * 1e8)) for u in utxos)
+    fee_sat = in_total - payout_sat
+    return PayoutQuoteRes(payout_sat=payout_sat, fee_sat=fee_sat)
+
 @app.post("/psbt/build", response_model=PSBTRes, dependencies=[Depends(require_api_key)])
 def psbt_build(body: PSBTBuildReq):
     order_id_var.set(body.order_id)
@@ -633,6 +666,13 @@ def psbt_finalize(body: FinalizeReq):
     if "fee" in dec and abs(int(round(dec["fee"] * 1e8)) - fee) > 1:
         log.error("psbt_fee_mismatch", psbt_fee=dec["fee"], calc_fee=fee / 1e8)
         raise HTTPException(400, "fee mismatch")
+
+    if meta:
+        funding_utxos = find_utxos_for_label(meta["label"], 0)
+        funded_total = sum(int(round(u.get("amount", 0) * 1e8)) for u in funding_utxos)
+        if out_total + fee > funded_total:
+            log.error("psbt_exceeds_funding", funded=funded_total, spending=out_total + fee)
+            raise HTTPException(400, "spends more than funded amount")
 
     fin = rpc("finalizepsbt", [body.psbt])
     if not fin.get("complete"):
