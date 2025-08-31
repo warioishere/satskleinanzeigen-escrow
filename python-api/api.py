@@ -282,6 +282,8 @@ class DecodeReq(BaseModel):
 
 class DecodeRes(BaseModel):
     sign_count: int
+    outputs: Dict[str, int]
+    fee_sat: int
 
 # ---- Webhook worker ----
 
@@ -620,12 +622,20 @@ def psbt_merge(body: MergeReq):
 @app.post("/psbt/decode", response_model=DecodeRes, dependencies=[Depends(require_api_key)])
 def psbt_decode(body: DecodeReq):
     dec = rpc("decodepsbt", [body.psbt])
+    vout = dec.get("tx", {}).get("vout", [])
+    outs: Dict[str, int] = {}
+    for o in vout:
+        addrs = o.get("scriptPubKey", {}).get("addresses", [])
+        if addrs:
+            outs[addrs[0]] = int(round(o.get("value", 0) * 1e8))
+    ana = rpc("analyzepsbt", [body.psbt])
+    fee_sat = int(round(ana.get("fee", 0) * 1e8)) if ana.get("fee") is not None else 0
     inputs = dec.get("inputs", [])
     count = 0
     if inputs:
         sigs = inputs[0].get("partial_signatures") or {}
         count = len(sigs)
-    return DecodeRes(sign_count=count)
+    return DecodeRes(sign_count=count, outputs=outs, fee_sat=fee_sat)
 
 @app.post("/psbt/finalize", dependencies=[Depends(require_api_key)])
 def psbt_finalize(body: FinalizeReq):

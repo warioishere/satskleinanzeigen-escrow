@@ -359,7 +359,22 @@ class WEO_Admin {
       }
       $order->save();
       $psbt_b64 = esc_textarea($resp['psbt']);
-      echo '<div class="notice notice-info"><p><strong>PSBT (Base64):</strong></p><textarea rows="4" style="width:100%;">'.$psbt_b64.'</textarea></div>';
+      $details = '';
+      $dec = weo_api_post('/psbt/decode', [ 'psbt' => $resp['psbt'] ]);
+      if (!is_wp_error($dec)) {
+        $outs = $dec['outputs'] ?? [];
+        if ($outs) {
+          $details .= '<p><strong>'.esc_html__('Outputs','weo').':</strong></p><ul>';
+          foreach ($outs as $addr => $sats) {
+            $details .= '<li>'.esc_html($addr).' – '.esc_html(number_format_i18n($sats)).' sats</li>';
+          }
+          $details .= '</ul>';
+        }
+        if (isset($dec['fee_sat'])) {
+          $details .= '<p><strong>'.esc_html__('Gebühr','weo').':</strong> '.esc_html(number_format_i18n(intval($dec['fee_sat']))).' sats</p>';
+        }
+      }
+      echo '<div class="notice notice-info"><p><strong>PSBT (Base64):</strong></p><textarea rows="4" style="width:100%;">'.$psbt_b64.'</textarea>'.$details.'</div>';
     } elseif ($resp !== null) {
       echo '<div class="notice notice-error"><p>PSBT konnte nicht erstellt werden.</p></div>';
     }

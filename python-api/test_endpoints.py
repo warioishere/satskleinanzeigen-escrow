@@ -69,11 +69,13 @@ def stub_rpc(method, params=None):
     if method == 'decodepsbt':
         psbt=params[0]
         if psbt=='merged':
-            return {'tx':{'vin':[{'txid':'tx1','vout':0,'sequence':0xfffffffd}], 'vout':[{'value':0.00055,'scriptPubKey':{'addresses':['tb1qseller111']}}]}, 'inputs':[{'partial_signatures':{'a':'s','b':'s'}}], 'fee':0.00005}
+            return {'tx':{'vin':[{'txid':'tx1','vout':0,'sequence':0xfffffffd}], 'vout':[{'value':0.00055,'scriptPubKey':{'addresses':['tb1qseller111']}}]}, 'inputs':[{'partial_signatures':{'a':'s','b':'s'}}]}
         elif psbt=='psbtR':
             return {'tx':{'vout':[{'value':0.00055,'scriptPubKey':{'addresses':['tb1qrefunded0']}}]}}
         else:
             return {'inputs':[{'partial_signatures':{'a':'s'}}], 'tx':{'vout':[{'value':0.00055,'scriptPubKey':{'addresses':['tb1qseller111']}}]}}
+    if method == 'analyzepsbt':
+        return {'fee':0.00005}
     if method == 'combinepsbt':
         return 'merged'
     if method == 'gettransaction':
@@ -112,7 +114,10 @@ def test_full_payout_flow(monkeypatch):
     assert r.json()['psbt']=='merged'
     r=client.post('/psbt/decode', json={'psbt':'merged'}, headers=headers)
     assert r.status_code==200, r.text
-    assert r.json()['sign_count']==2
+    dec=r.json()
+    assert dec['sign_count']==2
+    assert dec['outputs']['tb1qseller111']==55000
+    assert dec['fee_sat']==5000
     r=client.post('/psbt/finalize', json={'order_id':'order1','psbt':'merged','state':'completed'}, headers=headers)
     assert r.status_code==200, r.text
     assert r.json()['hex']=='deadbeef'

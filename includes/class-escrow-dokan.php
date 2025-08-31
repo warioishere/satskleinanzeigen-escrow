@@ -83,7 +83,22 @@ class WEO_Dokan {
                   ]);
                   if (!is_wp_error($resp) && !empty($resp['psbt'])) {
                     $psbt_b64 = esc_textarea($resp['psbt']);
-                    $psbt_notice = '<div class="dokan-alert dokan-alert-success"><p><strong>'.esc_html__('PSBT (Base64)','weo').':</strong></p><textarea rows="4" style="width:100%;">'.$psbt_b64.'</textarea></div>';
+                    $details = '';
+                    $dec = weo_api_post('/psbt/decode', [ 'psbt' => $resp['psbt'] ]);
+                    if (!is_wp_error($dec)) {
+                      $outs = $dec['outputs'] ?? [];
+                      if ($outs) {
+                        $details .= '<p><strong>'.esc_html__('Outputs','weo').':</strong></p><ul>';
+                        foreach ($outs as $addr => $sats) {
+                          $details .= '<li>'.esc_html($addr).' – '.esc_html(number_format_i18n($sats)).' sats</li>';
+                        }
+                        $details .= '</ul>';
+                      }
+                      if (isset($dec['fee_sat'])) {
+                        $details .= '<p><strong>'.esc_html__('Gebühr','weo').':</strong> '.esc_html(number_format_i18n(intval($dec['fee_sat']))).' sats</p>';
+                      }
+                    }
+                    $psbt_notice = '<div class="dokan-alert dokan-alert-success"><p><strong>'.esc_html__('PSBT (Base64)','weo').':</strong></p><textarea rows="4" style="width:100%;">'.$psbt_b64.'</textarea>'.$details.'</div>';
                   } else {
                     dokan_add_notice(__('PSBT konnte nicht erstellt werden.','weo'),'error');
                   }
@@ -124,7 +139,22 @@ class WEO_Dokan {
                           ]);
                           if (!is_wp_error($resp) && !empty($resp['psbt'])) {
                             $psbt_b64 = esc_textarea($resp['psbt']);
-                            $psbt_notice = '<div class="dokan-alert dokan-alert-success"><p><strong>'.esc_html__('PSBT (Base64)','weo').':</strong></p><textarea rows="4" style="width:100%;">'.$psbt_b64.'</textarea></div>';
+                            $details = '';
+                            $dec = weo_api_post('/psbt/decode', [ 'psbt' => $resp['psbt'] ]);
+                            if (!is_wp_error($dec)) {
+                              $outs = $dec['outputs'] ?? [];
+                              if ($outs) {
+                                $details .= '<p><strong>'.esc_html__('Outputs','weo').':</strong></p><ul>';
+                                foreach ($outs as $addr => $sats) {
+                                  $details .= '<li>'.esc_html($addr).' – '.esc_html(number_format_i18n($sats)).' sats</li>';
+                                }
+                                $details .= '</ul>';
+                              }
+                              if (isset($dec['fee_sat'])) {
+                                $details .= '<p><strong>'.esc_html__('Gebühr','weo').':</strong> '.esc_html(number_format_i18n(intval($dec['fee_sat']))).' sats</p>';
+                              }
+                            }
+                            $psbt_notice = '<div class="dokan-alert dokan-alert-success"><p><strong>'.esc_html__('PSBT (Base64)','weo').':</strong></p><textarea rows="4" style="width:100%;">'.$psbt_b64.'</textarea>'.$details.'</div>';
                           } else {
                             dokan_add_notice(__('PSBT konnte nicht erstellt werden.','weo'),'error');
                           }
