@@ -126,6 +126,10 @@ class BroadcastReq(BaseModel):
     order_id: Optional[str] = None
     state: str = "completed"
 
+class BumpFeeReq(BaseModel):
+    order_id: str
+    target_conf: int
+
 class DecodeReq(BaseModel):
     psbt: str
 
@@ -327,6 +331,7 @@ def tx_broadcast(body: BroadcastReq):
     if body.order_id:
         meta = db.get_order(body.order_id)
         if meta:
+            db.set_payout_txid(body.order_id, txid)
             if body.state not in {"completed", "refunded", "dispute"}:
                 raise HTTPException(400, "invalid final state")
             advance_state(meta, body.state)
@@ -334,3 +339,14 @@ def tx_broadcast(body: BroadcastReq):
                 event = "settled" if body.state == "completed" else body.state
                 woo_callback({"order_id": body.order_id, "event": event, "txid": txid})
     return {"txid": txid}
+
+
+@app.post("/tx/bumpfee", dependencies=[Depends(require_api_key)])
+def tx_bumpfee(body: BumpFeeReq):
+    meta = db.get_order(body.order_id)
+    if not meta or not meta.get("payout_txid"):
+        raise HTTPException(404, "txid not found")
+    res = rpc("bumpfee", [meta["payout_txid"], {"confTarget": body.target_conf}])
+    new_txid = res.get("txid") if isinstance(res, dict) else res
+    db.set_payout_txid(body.order_id, new_txid)
+    return {"txid": new_txid}

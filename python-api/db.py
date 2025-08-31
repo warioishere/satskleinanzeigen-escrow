@@ -27,10 +27,14 @@ def init_db():
             vout INTEGER,
             confirmations INTEGER,
             partials TEXT,
-            last_webhook_ts INTEGER
+            last_webhook_ts INTEGER,
+            payout_txid TEXT
         )
-        """
+        """,
     )
+    cols = [r[1] for r in cur.execute("PRAGMA table_info(orders)")]
+    if "payout_txid" not in cols:
+        cur.execute("ALTER TABLE orders ADD COLUMN payout_txid TEXT")
     conn.commit()
     conn.close()
 
@@ -120,3 +124,14 @@ def set_last_webhook_ts(order_id: str, ts: int):
     )
     conn.commit()
     conn.close()
+
+
+def set_payout_txid(order_id: str, txid: str):
+    conn = get_conn()
+    conn.execute(
+        "UPDATE orders SET payout_txid=? WHERE order_id=?",
+        (txid, order_id),
+    )
+    conn.commit()
+    conn.close()
+
