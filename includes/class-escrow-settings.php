@@ -9,6 +9,8 @@ class WEO_Settings {
 
   public function register() {
     register_setting('weo_settings', WEO_OPT, ['sanitize_callback'=>[$this,'sanitize']]);
+    register_setting('weo_settings', 'weo_vendor_payout_fallback', ['sanitize_callback'=>[$this,'sanitize_fallback_address']]);
+
     add_settings_section('weo_main', 'Escrow Einstellungen', '__return_false', 'weo');
     add_settings_field('api_base', 'Escrow-API Base URL', [$this,'field_api'], 'weo', 'weo_main');
     add_settings_field('escrow_xpub', 'Escrow xpub (dein Key)', [$this,'field_xpub'], 'weo', 'weo_main');
@@ -16,6 +18,7 @@ class WEO_Settings {
     add_settings_field('api_key', 'API Key', [$this,'field_api_key'], 'weo', 'weo_main');
     add_settings_field('hmac_secret', 'Webhook HMAC Secret', [$this,'field_hmac_secret'], 'weo', 'weo_main');
     add_settings_field('timeout_days', 'Signatur-Timeout (Tage)', [$this,'field_timeout'], 'weo', 'weo_main');
+    add_settings_field('vendor_payout_fallback', 'Fallback Vendor-Payout-Adresse', [$this,'field_vendor_payout_fallback'], 'weo', 'weo_main');
   }
 
   public function sanitize($opts) {
@@ -59,6 +62,18 @@ class WEO_Settings {
   public function field_timeout() {
     $v = intval(weo_get_option('timeout_days',7));
     echo "<input type='number' name='".WEO_OPT."[timeout_days]' value='$v' min='1' />"; 
+  }
+
+  public function field_vendor_payout_fallback() {
+    $v = esc_attr(get_option('weo_vendor_payout_fallback',''));
+    echo "<input type='text' name='weo_vendor_payout_fallback' value='$v' class='regular-text code' required />";
+    echo '<p class="description">Adresse, an die Verkäufer-Auszahlungen gehen, falls keine individuelle Adresse hinterlegt ist. Ohne gültige Adresse werden Auszahlungen abgebrochen.</p>';
+  }
+
+  public function sanitize_fallback_address($addr) {
+    $addr = weo_sanitize_btc_address($addr);
+    if (!$addr) add_settings_error('weo_vendor_payout_fallback','required',__('Bitte eine gültige Fallback-Adresse angeben.','weo'));
+    return $addr;
   }
 
   public function render() { ?>

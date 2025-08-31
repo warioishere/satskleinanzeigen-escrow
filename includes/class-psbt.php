@@ -24,7 +24,10 @@ class WEO_Psbt {
 
     $payoutAddr = $vendor_id ? get_user_meta($vendor_id,'weo_vendor_payout_address',true) : '';
     if (!$payoutAddr) {
-      $payoutAddr = get_option('weo_vendor_payout_fallback','bc1qexamplefallbackaddressxxxxxxxxxxxxxxxxxx');
+      $payoutAddr = get_option('weo_vendor_payout_fallback','');
+    }
+    if (!$payoutAddr) {
+      return new WP_Error('weo_psbt', __('Keine Fallback-Payout-Adresse konfiguriert.','weo'));
     }
     if (!weo_validate_btc_address($payoutAddr)) {
       return new WP_Error('weo_psbt', __('Payout-Adresse ungültig.','weo'));

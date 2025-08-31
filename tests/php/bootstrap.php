@@ -23,7 +23,10 @@ function wp_create_nonce($a){return 'nonce';}
 function wp_nonce_field($a){echo '<input type="hidden" name="_wpnonce" value="nonce" />';}
 function current_user_can($c){return true;}
 function date_i18n($f,$ts){return 'DATE';}
-function get_option($k){return 'Y-m-d';}
+function get_option($k){
+    if ($k === 'weo_vendor_payout_fallback') return 'bc1qtestfallbackaddress000000000000000000000';
+    return 'Y-m-d';
+}
 
 // Global state
 function wc_get_order($id){ global $test_order; return $test_order; }

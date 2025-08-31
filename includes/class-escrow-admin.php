@@ -416,6 +416,9 @@ class WEO_Admin {
         if ($payout) return $payout;
       }
     }
-    return get_option('weo_vendor_payout_fallback','bc1qexamplefallbackaddressxxxxxxxxxxxxxxxxxx');
+    $fallback = get_option('weo_vendor_payout_fallback','');
+    if ($fallback) return $fallback;
+    wc_add_notice(__('Keine Fallback-Payout-Adresse konfiguriert.','weo'),'error');
+    throw new Exception('Fallback vendor payout address missing');
   }
 }
