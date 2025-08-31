@@ -5,7 +5,7 @@
 1. Install Bitcoin Core >= 25 with wallet support.
 2. Create a wallet dedicated to escrow operations:
    ```bash
-   bitcoin-cli createwallet escrow
+   bitcoin-cli createwallet "escrowwatch" true true "" true true
    ```
 3. Enable RPC access for the API user in `bitcoin.conf`:
    ```ini
