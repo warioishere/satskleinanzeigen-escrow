@@ -319,6 +319,7 @@ class WEO_Order {
           if ($cur && $cur == $vendor_id) {
             $order->update_meta_data('_weo_shipped', time());
             $order->save();
+            do_action('weo_order_shipped', $order_id);
             echo '<div class="notice weo weo-info"><p>Versand bestätigt.</p></div>';
           } else {
             echo '<div class="notice weo weo-error"><p>Keine Berechtigung.</p></div>';
@@ -331,6 +332,7 @@ class WEO_Order {
           if ($cur && $cur == $buyer_id) {
             $order->update_meta_data('_weo_received', time());
             $order->save();
+            do_action('weo_order_received', $order_id);
             echo '<div class="notice weo weo-info"><p>Empfang bestätigt.</p></div>';
           } else {
             echo '<div class="notice weo weo-error"><p>Keine Berechtigung.</p></div>';
@@ -484,6 +486,8 @@ class WEO_Order {
     $signs = is_wp_error($dec) ? 0 : intval($dec['sign_count'] ?? 0);
     $order->update_meta_data('_weo_psbt_sign_count', $signs);
     $order->save();
+
+    do_action('weo_psbt_uploaded', $order_id, $cur);
 
     // Bei offenem Dispute keine Finalisierung/Broadcast
     if ($order->get_meta('_weo_dispute')) {

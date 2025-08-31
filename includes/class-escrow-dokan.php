@@ -50,6 +50,7 @@ class WEO_Dokan {
             } else {
               $order->update_meta_data('_weo_shipped', time());
               $order->save();
+              do_action('weo_order_shipped', $order_id);
               dokan_add_notice(__('Versand markiert','weo'),'success');
             }
           } elseif ($act === 'mark_received') {
@@ -60,6 +61,7 @@ class WEO_Dokan {
             } else {
               $order->update_meta_data('_weo_received', time());
               $order->save();
+              do_action('weo_order_received', $order_id);
               dokan_add_notice(__('Empfang bestätigt','weo'),'success');
             }
           } else {
