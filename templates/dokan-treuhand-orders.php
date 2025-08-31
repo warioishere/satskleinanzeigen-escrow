@@ -1,6 +1,7 @@
 <?php
 if (!defined('ABSPATH')) exit;
 ?>
+<?php if (!empty($psbt_notice)) echo $psbt_notice; ?>
 <?php if (!empty($orders)) : ?>
   <?php foreach ($orders as $o) : ?>
     <div class="weo-escrow-order">
@@ -15,6 +16,23 @@ if (!defined('ABSPATH')) exit;
       <?php if (!empty($o['addr'])) : ?>
         <p><strong><?php esc_html_e('Escrow-Adresse','weo'); ?>:</strong> <code id="weo_addr_<?php echo intval($o['id']); ?>"><?php echo esc_html($o['addr']); ?></code></p>
         <div class="weo-qr" id="weo_qr_<?php echo intval($o['id']); ?>"></div>
+      <?php endif; ?>
+      <?php if (in_array($o['state'], ['escrow_funded','signing','dispute'])) : ?>
+        <?php $nonce = wp_create_nonce('weo_psbt_'.$o['id']); ?>
+        <?php if ($o['state'] !== 'dispute') : ?>
+        <form method="post" class="dokan-form" style="margin-top:10px;">
+          <input type="hidden" name="order_id" value="<?php echo intval($o['id']); ?>">
+          <input type="hidden" name="weo_nonce" value="<?php echo esc_attr($nonce); ?>">
+          <input type="hidden" name="weo_action" value="build_psbt_payout">
+          <button type="submit" class="dokan-btn"><?php esc_html_e('PSBT (Auszahlung an Verkäufer) erstellen','weo'); ?></button>
+        </form>
+        <?php endif; ?>
+        <form method="post" class="dokan-form" style="margin-top:10px;">
+          <input type="hidden" name="order_id" value="<?php echo intval($o['id']); ?>">
+          <input type="hidden" name="weo_nonce" value="<?php echo esc_attr($nonce); ?>">
+          <input type="hidden" name="weo_action" value="build_psbt_refund">
+          <button type="submit" class="dokan-btn"><?php esc_html_e('PSBT (Erstattung an Käufer) erstellen','weo'); ?></button>
+        </form>
       <?php endif; ?>
       <form method="post" action="<?php echo esc_url(admin_url('admin-post.php')); ?>" class="dokan-form" style="margin-top:10px;">
         <input type="hidden" name="action" value="weo_upload_psbt_seller">
