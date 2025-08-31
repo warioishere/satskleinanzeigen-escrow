@@ -135,3 +135,19 @@ def set_payout_txid(order_id: str, txid: str):
     conn.commit()
     conn.close()
 
+
+def count_pending_signatures() -> int:
+    conn = get_conn()
+    cur = conn.execute("SELECT partials FROM orders WHERE state='signing'")
+    rows = cur.fetchall()
+    conn.close()
+    pending = 0
+    for r in rows:
+        try:
+            parts = json.loads(r["partials"]) if r["partials"] else []
+        except Exception:
+            parts = []
+        if len(parts) < 2:
+            pending += 2 - len(parts)
+    return pending
+

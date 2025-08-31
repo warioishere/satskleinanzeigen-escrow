@@ -1,7 +1,8 @@
 import os, json, hmac, hashlib, time, threading, queue, uuid, logging, sys
 from typing import Any, Dict, List, Optional
-from fastapi import FastAPI, HTTPException, Header, Depends, Request
+from fastapi import FastAPI, HTTPException, Header, Depends, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel, Field, validator, root_validator, constr
 import re, base64
 import requests
@@ -9,6 +10,7 @@ from dotenv import load_dotenv
 import structlog
 from contextvars import ContextVar
 from starlette.middleware.base import BaseHTTPMiddleware
+from prometheus_client import Histogram, Counter, Gauge, generate_latest, CONTENT_TYPE_LATEST
 import db
 
 load_dotenv()
@@ -31,6 +33,20 @@ WEBHOOK_RETRIES  = int(os.getenv("WEBHOOK_RETRIES", "3"))
 WEBHOOK_BACKOFF  = float(os.getenv("WEBHOOK_BACKOFF", "2"))
 
 db.init_db()
+
+# ---- Prometheus metrics ----
+RPC_HIST = Histogram('rpc_duration_seconds', 'Bitcoin Core RPC duration', ['method'])
+WEBHOOK_COUNTER = Counter('webhook_total', 'Webhook deliveries', ['status'])
+PENDING_SIG = Gauge('pending_signatures', 'Open PSBT signatures')
+
+
+def update_pending_gauge():
+    try:
+        PENDING_SIG.set(db.count_pending_signatures())
+    except Exception:
+        PENDING_SIG.set(0)
+
+update_pending_gauge()
 
 # ---- logging ----
 logging.basicConfig(stream=sys.stdout, format="%(message)s", level=logging.INFO)
@@ -142,6 +158,7 @@ def rpc(method: str, params: List[Any] = None) -> Any:
         raise HTTPException(status_code=500, detail=j["error"]["message"])
     duration = time.time() - start
     bound.info("rpc_success", duration=duration)
+    RPC_HIST.labels(method=method).observe(duration)
     return j["result"]
 
 # ---- Models ----
@@ -233,6 +250,7 @@ def _webhook_worker():
         if payload.get("event") != "escrow_funded" and meta and meta.get("last_webhook_ts"):
             _webhook_q.task_done()
             continue
+        success = False
         for attempt in range(WEBHOOK_RETRIES):
             body = json.dumps(payload, separators=(",",":")).encode()
             ts   = str(int(time.time()))
@@ -246,10 +264,15 @@ def _webhook_worker():
                 if 200 <= r.status_code < 300:
                     if payload.get("event") != "escrow_funded":
                         db.set_last_webhook_ts(order_id, int(ts))
+                    success = True
                     break
             except Exception:
                 pass
             time.sleep(WEBHOOK_BACKOFF ** attempt)
+        if success:
+            WEBHOOK_COUNTER.labels(status="success").inc()
+        else:
+            WEBHOOK_COUNTER.labels(status="error").inc()
         _webhook_q.task_done()
 
 def woo_callback(payload: Dict[str, Any]):
@@ -270,12 +293,14 @@ def advance_state(order: Dict[str, Any], new_state: str, confirmations: Optional
     if new_state == cur:
         if confirmations is not None:
             db.update_state(order["order_id"], cur, confirmations)
+            update_pending_gauge()
         return False
     allowed = STATE_TRANSITIONS.get(cur, set())
     if new_state not in allowed:
         raise HTTPException(400, f"invalid state transition {cur}->{new_state}")
     db.update_state(order["order_id"], new_state, confirmations)
     order["state"] = new_state
+    update_pending_gauge()
     return True
 
 def find_utxos_for_label(label: str, min_conf: int) -> List[Dict[str,Any]]:
@@ -285,8 +310,31 @@ def find_utxos_for_label(label: str, min_conf: int) -> List[Dict[str,Any]]:
 
 # ---- Routes ----
 @app.get("/health")
-def health():
-    return {"ok": True}
+def health(response: Response):
+    db_ok = True
+    try:
+        conn = db.get_conn()
+        conn.execute("SELECT 1")
+        conn.close()
+    except Exception:
+        db_ok = False
+
+    rpc_ok = True
+    try:
+        rpc("getblockchaininfo")
+    except Exception:
+        rpc_ok = False
+
+    qlen = _webhook_q.qsize()
+    ok = db_ok and rpc_ok
+    if not ok:
+        response.status_code = 503
+    return {"ok": ok, "db": db_ok, "rpc": rpc_ok, "webhook_queue": qlen}
+
+
+@app.get("/metrics")
+def metrics():
+    return PlainTextResponse(generate_latest(), media_type=CONTENT_TYPE_LATEST)
 
 @app.post("/orders", response_model=CreateOrderRes, dependencies=[Depends(require_api_key)])
 def create_order(body: CreateOrderReq):
@@ -383,6 +431,7 @@ def psbt_merge(body: MergeReq):
         new_parts = [p for p in body.partials if p not in prev]
         merged_list = prev + new_parts
         db.save_partials(body.order_id, merged_list)
+        update_pending_gauge()
     merged = rpc("combinepsbt", [merged_list])
     return PSBTRes(psbt=merged)
 

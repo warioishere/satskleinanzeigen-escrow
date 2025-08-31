@@ -45,3 +45,20 @@ ALLOW_ORIGINS=https://shop-staging.example.com
 ```
 
 After updating the value, redeploy the API so the new origins take effect.
+
+## Prometheus metrics
+
+The API exposes metrics under `/metrics` in the Prometheus exposition format. The following metrics are available:
+
+- `rpc_duration_seconds` – histogram of Bitcoin Core RPC latency, labelled by `method`
+- `webhook_total` – counter for webhook deliveries with label `status` (`success` or `error`)
+- `pending_signatures` – gauge for the number of missing PSBT signatures across orders
+
+Example scrape configuration:
+
+```yaml
+scrape_configs:
+  - job_name: escrow_api
+    static_configs:
+      - targets: ['api.example.com:8080']
+```
