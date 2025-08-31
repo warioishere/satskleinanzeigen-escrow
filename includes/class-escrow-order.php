@@ -453,7 +453,15 @@ class WEO_Order {
     ]);
     if (!is_wp_error($tx) && !empty($tx['txid'])) {
       $order->update_meta_data('_weo_payout_txid', $tx['txid']);
-      $order->update_status('completed', 'Escrow ausgezahlt. TXID: '.$tx['txid']);
+      $outcome = $order->get_meta('_weo_dispute_outcome');
+      if ($outcome === 'refund') {
+        $order->update_status('refunded', 'Escrow erstattet. TXID: '.$tx['txid']);
+      } else {
+        $order->update_status('completed', 'Escrow ausgezahlt. TXID: '.$tx['txid']);
+      }
+      $order->delete_meta_data('_weo_dispute');
+      $order->delete_meta_data('_weo_dispute_outcome');
+      $order->save();
     }
 
     wp_safe_redirect(wp_get_referer()); exit;

@@ -213,6 +213,21 @@ class WEO_Admin {
     }
 
     $oid = weo_sanitize_order_id((string)$order->get_order_number());
+
+    if (in_array($action, ['build_psbt_payout','build_psbt_refund'], true)) {
+      $state = '';
+      if ($order->get_meta('_weo_dispute')) {
+        $state = 'dispute';
+      } else {
+        $status = weo_api_get('/orders/'.rawurlencode($oid).'/status');
+        $state  = is_wp_error($status) ? '' : ($status['state'] ?? '');
+      }
+      if ($state !== 'dispute') {
+        echo '<div class="notice notice-error"><p>Bestellung nicht im Dispute.</p></div>';
+        return;
+      }
+    }
+
     if ($action === 'build_psbt_payout') {
       $payoutAddr = get_user_meta($order->get_meta('_weo_vendor_id'), 'weo_vendor_payout_address', true);
       if (!$payoutAddr) $payoutAddr = $this->fallback_vendor_payout_address($order_id);
@@ -265,6 +280,12 @@ class WEO_Admin {
     }
 
     if (!empty($resp) && !is_wp_error($resp) && !empty($resp['psbt'])) {
+      if ($action === 'build_psbt_payout') {
+        $order->update_meta_data('_weo_dispute_outcome', 'payout');
+      } elseif ($action === 'build_psbt_refund') {
+        $order->update_meta_data('_weo_dispute_outcome', 'refund');
+      }
+      $order->save();
       $psbt_b64 = esc_textarea($resp['psbt']);
       echo '<div class="notice notice-info"><p><strong>PSBT (Base64):</strong></p><textarea rows="4" style="width:100%;">'.$psbt_b64.'</textarea></div>';
     } elseif ($resp !== null) {
