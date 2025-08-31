@@ -13,7 +13,8 @@ class WEO_Order {
     add_action('add_meta_boxes', [$this,'metabox']);
 
     // Upload signierter PSBTs
-    add_action('admin_post_weo_upload_psbt', [$this,'handle_upload']);
+    add_action('admin_post_weo_upload_psbt_buyer',  [$this,'handle_upload']);
+    add_action('admin_post_weo_upload_psbt_seller', [$this,'handle_upload']);
 
     // Assets
     add_action('wp_enqueue_scripts', [$this,'enqueue_assets']);
@@ -138,14 +139,39 @@ class WEO_Order {
       echo '<p><button class="button">PSBT (Auszahlung an Verkäufer) erstellen</button></p>';
       echo '</form>';
 
-      // Signierte PSBT hochladen
-      echo '<form method="post" action="'.esc_url(admin_url('admin-post.php')).'" style="margin-top:10px;">';
-      echo '<input type="hidden" name="action" value="weo_upload_psbt">';
-      echo '<input type="hidden" name="order_id" value="'.intval($order_id).'">';
-      echo '<p><label>Signierte PSBT (Base64)</label><br/>';
-      echo '<textarea name="weo_signed_psbt" rows="6" style="width:100%" placeholder="PSBT…"></textarea></p>';
-      echo '<p><button class="button button-primary">Signierte PSBT hochladen</button></p>';
+      // PSBT (Refund) erstellen
+      echo '<form method="post" action="" style="margin-top:10px;">';
+      echo '<input type="hidden" name="weo_action" value="build_psbt_refund">';
+      echo '<input type="hidden" name="weo_nonce" value="'.$nonce.'">';
+      echo '<p><button class="button">PSBT (Erstattung an Käufer) erstellen</button></p>';
       echo '</form>';
+
+      // Signierte PSBT hochladen (buyer)
+      $upload_url = esc_url(admin_url('admin-post.php'));
+      $cur = get_current_user_id();
+      $buyer_id  = $order->get_user_id();
+      $vendor_id = $order->get_meta('_weo_vendor_id');
+      if (!$vendor_id) { $this->fallback_vendor_payout_address($order_id); $vendor_id = $order->get_meta('_weo_vendor_id'); }
+
+      if ($cur && $cur == $buyer_id) {
+        echo '<form method="post" action="'.$upload_url.'" style="margin-top:10px;">';
+        echo '<input type="hidden" name="action" value="weo_upload_psbt_buyer">';
+        echo '<input type="hidden" name="order_id" value="'.intval($order_id).'">';
+        echo '<p><label>Signierte PSBT (Base64, Käufer)</label><br/>';
+        echo '<textarea name="weo_signed_psbt" rows="6" style="width:100%" placeholder="PSBT…"></textarea></p>';
+        echo '<p><button class="button button-primary">PSBT hochladen</button></p>';
+        echo '</form>';
+      }
+
+      if ($cur && $cur == $vendor_id) {
+        echo '<form method="post" action="'.$upload_url.'" style="margin-top:10px;">';
+        echo '<input type="hidden" name="action" value="weo_upload_psbt_seller">';
+        echo '<input type="hidden" name="order_id" value="'.intval($order_id).'">';
+        echo '<p><label>Signierte PSBT (Base64, Verkäufer)</label><br/>';
+        echo '<textarea name="weo_signed_psbt" rows="6" style="width:100%" placeholder="PSBT…"></textarea></p>';
+        echo '<p><button class="button button-primary">PSBT hochladen</button></p>';
+        echo '</form>';
+      }
     }
 
     echo '</section>';
@@ -184,26 +210,40 @@ class WEO_Order {
     })();
     </script>";
 
-    // Handle PSBT-Build direkt nach dem Panel (MVP – du kannst es auch in separatem Endpoint lösen)
-    if (!empty($_POST['weo_action']) && $_POST['weo_action']==='build_psbt_payout' && wp_verify_nonce($_POST['weo_nonce'],'weo_psbt_'.$order_id)) {
-      $payoutAddr = get_user_meta($order->get_meta('_weo_vendor_id'), 'weo_vendor_payout_address', true);
-      if (!$payoutAddr) $payoutAddr = $this->fallback_vendor_payout_address($order_id);
+    // Handle PSBT-Build direkt nach dem Panel (MVP)
+    if (!empty($_POST['weo_action']) && wp_verify_nonce($_POST['weo_nonce'],'weo_psbt_'.$order_id)) {
+      // Betrag: i. d. R. voller Escrow-Input – hier Order-Total in sats
+      $amount_sats = intval(round($order->get_total()*1e8));
 
-      // Betrag: i. d. R. voller Escrow-Input – hier vereinfachend Order-Total in sats (falls du Fixpreis in BTC nutzt, pass das an)
-      $amount_sats = intval(round($order->get_total()*1e8)); // ACHTUNG: nur korrekt, wenn Preis in BTC gespeichert ist
-
-      $resp = weo_api_post('/psbt/build', [
-        'order_id'    => (string)$order->get_order_number(),
-        'outputs'     => [ $payoutAddr => $amount_sats ],
-        'rbf'         => true,
-        'target_conf' => 3
-      ]);
-
-      if (!is_wp_error($resp) && !empty($resp['psbt'])) {
-        $psbt_b64 = esc_textarea($resp['psbt']);
-        echo '<div class="notice weo weo-info"><p><strong>PSBT (Base64):</strong></p><textarea rows="6" style="width:100%;">'.$psbt_b64.'</textarea><p>Bitte in deiner Wallet laden, signieren und unten wieder hochladen.</p></div>';
+      if ($_POST['weo_action'] === 'build_psbt_payout') {
+        $payoutAddr = get_user_meta($order->get_meta('_weo_vendor_id'), 'weo_vendor_payout_address', true);
+        if (!$payoutAddr) $payoutAddr = $this->fallback_vendor_payout_address($order_id);
+        $outputs = [ $payoutAddr => $amount_sats ];
+      } elseif ($_POST['weo_action'] === 'build_psbt_refund') {
+        $refundAddr = get_user_meta($order->get_user_id(), 'weo_buyer_payout_address', true);
+        if (!$refundAddr) {
+          echo '<div class="notice weo weo-error"><p>Keine Käuferadresse hinterlegt.</p></div>';
+          return;
+        }
+        $outputs = [ $refundAddr => $amount_sats ];
       } else {
-        echo '<div class="notice weo weo-error"><p>PSBT konnte nicht erstellt werden.</p></div>';
+        $outputs = [];
+      }
+
+      if ($outputs) {
+        $resp = weo_api_post('/psbt/build', [
+          'order_id'    => (string)$order->get_order_number(),
+          'outputs'     => $outputs,
+          'rbf'         => true,
+          'target_conf' => 3
+        ]);
+
+        if (!is_wp_error($resp) && !empty($resp['psbt'])) {
+          $psbt_b64 = esc_textarea($resp['psbt']);
+          echo '<div class="notice weo weo-info"><p><strong>PSBT (Base64):</strong></p><textarea rows="6" style="width:100%;">'.$psbt_b64.'</textarea><p>Bitte in deiner Wallet laden, signieren und unten wieder hochladen.</p></div>';
+        } else {
+          echo '<div class="notice weo weo-error"><p>PSBT konnte nicht erstellt werden.</p></div>';
+        }
       }
     }
   }
@@ -212,20 +252,39 @@ class WEO_Order {
   public function handle_upload() {
     if (!is_user_logged_in()) wp_die('Nicht erlaubt.');
     $order_id = intval($_POST['order_id'] ?? 0);
-    $psbt = trim(wp_unslash($_POST['weo_signed_psbt'] ?? ''));
+    $psbt     = trim(wp_unslash($_POST['weo_signed_psbt'] ?? ''));
+    $action   = sanitize_text_field($_POST['action'] ?? '');
     if (!$order_id || !$psbt) wp_die('Fehlende Daten.');
 
     $order = wc_get_order($order_id); if (!$order) wp_die('Bestellung nicht gefunden.');
 
-    // Partials sammeln (alternativ: direkt an API senden, die intern speichert)
-    $partials = (array) $order->get_meta('_weo_psbt_partials');
+    $buyer_id  = $order->get_user_id();
+    $vendor_id = $order->get_meta('_weo_vendor_id');
+    if (!$vendor_id) { $this->fallback_vendor_payout_address($order_id); $vendor_id = $order->get_meta('_weo_vendor_id'); }
+    $cur = get_current_user_id();
+
+    if ($action === 'weo_upload_psbt_buyer') {
+      if ($cur !== $buyer_id) wp_die('Nicht erlaubt.');
+      $meta_key = '_weo_psbt_partials_buyer';
+    } else {
+      if ($cur !== $vendor_id) wp_die('Nicht erlaubt.');
+      $meta_key = '_weo_psbt_partials_seller';
+    }
+
+    $partials = (array) $order->get_meta($meta_key);
     $partials[] = $psbt;
-    $order->update_meta_data('_weo_psbt_partials', $partials); $order->save();
+    $order->update_meta_data($meta_key, $partials);
+    $order->save();
+
+    $all_partials = array_merge(
+      (array)$order->get_meta('_weo_psbt_partials_buyer'),
+      (array)$order->get_meta('_weo_psbt_partials_seller')
+    );
 
     // Merge
     $merge = weo_api_post('/psbt/merge', [
       'order_id' => (string)$order->get_order_number(),
-      'partials' => $partials
+      'partials' => $all_partials
     ]);
     if (is_wp_error($merge) || empty($merge['psbt'])) {
       wp_safe_redirect(wp_get_referer()); exit;
@@ -261,9 +320,11 @@ class WEO_Order {
     $order = wc_get_order($post->ID);
     echo '<p>Addr: <code>'.esc_html($order->get_meta('_weo_escrow_addr')).'</code></p>';
     echo '<p>Watch: <code>'.esc_html($order->get_meta('_weo_watch_id')).'</code></p>';
-    $partials = (array)$order->get_meta('_weo_psbt_partials');
-    if ($partials) {
-      echo '<p>Signaturen: '.count($partials).'</p>';
+    $pb = (array)$order->get_meta('_weo_psbt_partials_buyer');
+    $ps = (array)$order->get_meta('_weo_psbt_partials_seller');
+    $cnt = count($pb) + count($ps);
+    if ($cnt) {
+      echo '<p>Signaturen: '.$cnt.'</p>';
     }
   }
 
