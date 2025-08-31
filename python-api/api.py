@@ -677,16 +677,18 @@ def psbt_finalize(body: FinalizeReq):
     fin = rpc("finalizepsbt", [body.psbt])
     if not fin.get("complete"):
         raise HTTPException(400, "not enough signatures")
-    if meta:
-        if body.state not in {"completed", "refunded", "dispute"}:
-            raise HTTPException(400, "invalid final state")
-        advance_state(meta, body.state)
+    if meta and body.state not in {"completed", "refunded", "dispute"}:
+        raise HTTPException(400, "invalid final state")
     return {"hex": fin["hex"], "fee_sat": fee}
 
 @app.post("/tx/broadcast", dependencies=[Depends(require_api_key)])
 def tx_broadcast(body: BroadcastReq):
+    meta = None
     if body.order_id:
         order_id_var.set(body.order_id)
+        meta = db.get_order(body.order_id)
+        if not meta:
+            raise HTTPException(404, "order not found")
     try:
         txid = rpc("sendrawtransaction", [body.hex])
     except HTTPException as e:
@@ -696,17 +698,16 @@ def tx_broadcast(body: BroadcastReq):
             sentry_sdk.capture_message(
                 f"broadcast failed for order {body.order_id or 'n/a'}: {e.detail}"
             )
+        # Leave order in previous state if broadcast fails
         raise
-    if body.order_id:
-        meta = db.get_order(body.order_id)
-        if meta:
-            db.set_payout_txid(body.order_id, txid)
-            if body.state not in {"completed", "refunded", "dispute"}:
-                raise HTTPException(400, "invalid final state")
-            advance_state(meta, body.state)
-            if not meta.get("last_webhook_ts"):
-                event = "settled" if body.state == "completed" else body.state
-                woo_callback({"order_id": body.order_id, "event": event, "txid": txid})
+    if body.order_id and meta:
+        db.set_payout_txid(body.order_id, txid)
+        if body.state not in {"completed", "refunded", "dispute"}:
+            raise HTTPException(400, "invalid final state")
+        advance_state(meta, body.state)
+        if not meta.get("last_webhook_ts"):
+            event = "settled" if body.state == "completed" else body.state
+            woo_callback({"order_id": body.order_id, "event": event, "txid": txid})
     return {"txid": txid}
 
 
