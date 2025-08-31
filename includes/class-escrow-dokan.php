@@ -38,25 +38,26 @@ class WEO_Dokan {
           $act = sanitize_text_field($_POST['weo_action']);
           $vendor_id = intval($order->get_meta('_weo_vendor_id'));
           $buyer_id  = $order->get_user_id();
-          if (in_array($act, ['mark_shipped','mark_received'])) {
+
+          if ($act === 'mark_shipped') {
             if (!wp_verify_nonce($_POST['weo_nonce'] ?? '', 'weo_ship_'.$order_id)) {
               dokan_add_notice(__('Ungültiger Sicherheits-Token','weo'),'error');
-            } elseif ($act === 'mark_shipped') {
-              if ($user_id !== $vendor_id) {
-                dokan_add_notice(__('Keine Berechtigung','weo'),'error');
-              } else {
-                $order->update_meta_data('_weo_shipped', time());
-                $order->save();
-                dokan_add_notice(__('Versand markiert','weo'),'success');
-              }
-            } else { // mark_received
-              if ($user_id !== $buyer_id) {
-                dokan_add_notice(__('Keine Berechtigung','weo'),'error');
-              } else {
-                $order->update_meta_data('_weo_received', time());
-                $order->save();
-                dokan_add_notice(__('Empfang bestätigt','weo'),'success');
-              }
+            } elseif ($user_id !== $vendor_id) {
+              dokan_add_notice(__('Keine Berechtigung','weo'),'error');
+            } else {
+              $order->update_meta_data('_weo_shipped', time());
+              $order->save();
+              dokan_add_notice(__('Versand markiert','weo'),'success');
+            }
+          } elseif ($act === 'mark_received') {
+            if (!wp_verify_nonce($_POST['weo_nonce'] ?? '', 'weo_recv_'.$order_id)) {
+              dokan_add_notice(__('Ungültiger Sicherheits-Token','weo'),'error');
+            } elseif ($user_id !== $buyer_id) {
+              dokan_add_notice(__('Keine Berechtigung','weo'),'error');
+            } else {
+              $order->update_meta_data('_weo_received', time());
+              $order->save();
+              dokan_add_notice(__('Empfang bestätigt','weo'),'success');
             }
           } else {
             if (!wp_verify_nonce($_POST['weo_nonce'] ?? '', 'weo_psbt_'.$order_id)) {
@@ -161,16 +162,15 @@ class WEO_Dokan {
           }
         }
         $list[] = [
-          'id'       => $order->get_id(),
-          'number'   => $order->get_order_number(),
-          'addr'     => $addr,
-          'state'    => $state,
-          'funding'  => $funding,
-          'shipped'  => intval($order->get_meta('_weo_shipped')),
-          'received' => intval($order->get_meta('_weo_received')),
-          'buyer_id' => $order->get_user_id(),
-          'vendor_id'=> intval($order->get_meta('_weo_vendor_id')),
-          'role'     => 'vendor',
+          'id'        => $order->get_id(),
+          'number'    => $order->get_order_number(),
+          'addr'      => $addr,
+          'state'     => $state,
+          'funding'   => $funding,
+          'shipped'   => intval($order->get_meta('_weo_shipped')),
+          'received'  => intval($order->get_meta('_weo_received')),
+          'buyer_id'  => $order->get_user_id(),
+          'vendor_id' => intval($order->get_meta('_weo_vendor_id')),
         ];
         $seen[$order->get_id()] = true;
       }
@@ -189,16 +189,15 @@ class WEO_Dokan {
           }
         }
         $list[] = [
-          'id'       => $order->get_id(),
-          'number'   => $order->get_order_number(),
-          'addr'     => $addr,
-          'state'    => $state,
-          'funding'  => $funding,
-          'shipped'  => intval($order->get_meta('_weo_shipped')),
-          'received' => intval($order->get_meta('_weo_received')),
-          'buyer_id' => $order->get_user_id(),
-          'vendor_id'=> intval($order->get_meta('_weo_vendor_id')),
-          'role'     => 'buyer',
+          'id'        => $order->get_id(),
+          'number'    => $order->get_order_number(),
+          'addr'      => $addr,
+          'state'     => $state,
+          'funding'   => $funding,
+          'shipped'   => intval($order->get_meta('_weo_shipped')),
+          'received'  => intval($order->get_meta('_weo_received')),
+          'buyer_id'  => $order->get_user_id(),
+          'vendor_id' => intval($order->get_meta('_weo_vendor_id')),
         ];
       }
 
