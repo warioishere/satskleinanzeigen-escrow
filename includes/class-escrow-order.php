@@ -239,6 +239,22 @@ class WEO_Order {
 
   /** Fallback – trag hier eine Vendor-Payout-Adresse ein, falls nicht separat gepflegt */
   private function fallback_vendor_payout_address($order_id) {
+    $order = wc_get_order($order_id);
+    if ($order) {
+      $vendor_id = $order->get_meta('_weo_vendor_id');
+      if (!$vendor_id) {
+        foreach ($order->get_items('line_item') as $item) {
+          $pid = $item->get_product_id();
+          $vendor_id = get_post_field('post_author',$pid);
+          if ($vendor_id) break;
+        }
+        if ($vendor_id) { $order->update_meta_data('_weo_vendor_id',$vendor_id); $order->save(); }
+      }
+      if ($vendor_id) {
+        $payout = get_user_meta($vendor_id,'weo_vendor_payout_address',true);
+        if ($payout) return $payout;
+      }
+    }
     return get_option('weo_vendor_payout_fallback','bc1qexamplefallbackaddressxxxxxxxxxxxxxxxxxx');
   }
 }

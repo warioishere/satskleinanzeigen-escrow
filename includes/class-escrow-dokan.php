@@ -27,11 +27,14 @@ class WEO_Dokan {
     $user_id = get_current_user_id();
     if ('POST' === $_SERVER['REQUEST_METHOD'] && isset($_POST['weo_vendor_xpub'])) {
       check_admin_referer('weo_dokan_xpub');
-      $xpub = weo_sanitize_xpub(wp_unslash($_POST['weo_vendor_xpub']));
+      $xpub   = weo_sanitize_xpub(wp_unslash($_POST['weo_vendor_xpub']));
+      $payout = isset($_POST['weo_vendor_payout_address']) ? weo_sanitize_btc_address(wp_unslash($_POST['weo_vendor_payout_address'])) : '';
       update_user_meta($user_id,'weo_vendor_xpub',$xpub);
-      dokan_add_notice(__('Escrow xpub gespeichert','weo'),'success');
+      if ($payout) update_user_meta($user_id,'weo_vendor_payout_address',$payout);
+      dokan_add_notice(__('Escrow-Daten gespeichert','weo'),'success');
     }
-    $xpub = get_user_meta($user_id,'weo_vendor_xpub',true);
+    $xpub   = get_user_meta($user_id,'weo_vendor_xpub',true);
+    $payout = get_user_meta($user_id,'weo_vendor_payout_address',true);
     $file = WEO_DIR.'templates/dokan-treuhand.php';
     if (file_exists($file)) include $file;
   }

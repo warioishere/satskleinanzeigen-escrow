@@ -8,6 +8,10 @@ if (!defined('ABSPATH')) exit;
     <input type="text" class="dokan-form-control" name="weo_vendor_xpub" id="weo_vendor_xpub" value="<?php echo esc_attr($xpub); ?>">
   </div>
   <div class="dokan-form-group">
+    <label for="weo_vendor_payout_address" class="dokan-form-label"><?php esc_html_e('Payout-Adresse','weo'); ?></label>
+    <input type="text" class="dokan-form-control" name="weo_vendor_payout_address" id="weo_vendor_payout_address" value="<?php echo esc_attr($payout); ?>">
+  </div>
+  <div class="dokan-form-group">
     <button type="submit" class="dokan-btn dokan-btn-theme">
       <?php esc_html_e('Speichern','weo'); ?>
     </button>

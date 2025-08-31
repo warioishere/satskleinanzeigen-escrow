@@ -42,3 +42,8 @@ function weo_sanitize_xpub($x) {
   }
   return $x;
 }
+
+function weo_sanitize_btc_address($addr) {
+  $addr = trim($addr);
+  return sanitize_text_field($addr);
+}
