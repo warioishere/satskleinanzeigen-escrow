@@ -13,7 +13,8 @@ BTC_CORE_USER    = os.getenv("BTC_CORE_USER", "")
 BTC_CORE_PASS    = os.getenv("BTC_CORE_PASS", "")
 BTC_CORE_WALLET  = os.getenv("BTC_CORE_WALLET", "escrowwatch")
 PORT             = int(os.getenv("PORT", "8080"))
-API_KEY_EXPECTED = os.getenv("API_KEY", "")
+API_KEYS         = {k.strip() for k in os.getenv("API_KEYS", "").split(",") if k.strip()}
+API_KEY_REVOKED  = {k.strip() for k in os.getenv("API_KEY_REVOKED", "").split(",") if k.strip()}
 ALLOW_ORIGINS    = [o.strip() for o in os.getenv("ALLOW_ORIGINS","*").split(",") if o.strip()]
 WOO_CALLBACK_URL = os.getenv("WOO_CALLBACK_URL", "")
 WOO_HMAC_SECRET  = os.getenv("WOO_HMAC_SECRET", "")
@@ -30,8 +31,9 @@ app.add_middleware(
 
 # ---- Simple API-Key dependency (optional) ----
 def require_api_key(x_api_key: Optional[str] = Header(None)):
-    if API_KEY_EXPECTED and x_api_key != API_KEY_EXPECTED:
-        raise HTTPException(status_code=401, detail="missing/invalid api key")
+    if API_KEYS:
+        if not x_api_key or x_api_key not in API_KEYS or x_api_key in API_KEY_REVOKED:
+            raise HTTPException(status_code=401, detail="missing/invalid api key")
 
 # ---- Bitcoin Core RPC ----
 def rpc(method: str, params: List[Any] = None) -> Any:

@@ -13,6 +13,7 @@ class WEO_Settings {
     add_settings_field('api_base', 'Escrow-API Base URL', [$this,'field_api'], 'weo', 'weo_main');
     add_settings_field('escrow_xpub', 'Escrow xpub (dein Key)', [$this,'field_xpub'], 'weo', 'weo_main');
     add_settings_field('min_conf', 'Min. Bestätigungen', [$this,'field_conf'], 'weo', 'weo_main');
+    add_settings_field('api_key', 'API Key', [$this,'field_api_key'], 'weo', 'weo_main');
   }
 
   public function sanitize($opts) {
@@ -20,6 +21,7 @@ class WEO_Settings {
     $clean['api_base']   = esc_url_raw($opts['api_base'] ?? '');
     $clean['escrow_xpub']= weo_sanitize_xpub($opts['escrow_xpub'] ?? '');
     $clean['min_conf']   = max(0, intval($opts['min_conf'] ?? 1));
+    $clean['api_key']    = sanitize_text_field($opts['api_key'] ?? '');
     return $clean;
   }
 
@@ -38,6 +40,11 @@ class WEO_Settings {
   public function field_conf() {
     $v = intval(weo_get_option('min_conf',2));
     echo "<input type='number' name='".WEO_OPT."[min_conf]' value='$v' min='0' max='6' />";
+  }
+
+  public function field_api_key() {
+    $v = esc_attr(weo_get_option('api_key',''));
+    echo "<input type='text' name='".WEO_OPT."[api_key]' value='$v' class='regular-text' />";
   }
 
   public function render() { ?>

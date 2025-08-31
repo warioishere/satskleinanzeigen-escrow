@@ -8,8 +8,11 @@ function weo_get_option($key, $default = '') {
 
 function weo_api_post($endpoint, $body = []) {
   $base = rtrim(weo_get_option('api_base'), '/');
+  $key  = weo_get_option('api_key','');
+  $headers = ['Content-Type'=>'application/json'];
+  if ($key) $headers['x-api-key'] = $key;
   $resp = wp_remote_post("$base$endpoint", [
-    'headers' => ['Content-Type'=>'application/json'],
+    'headers' => $headers,
     'timeout' => 20,
     'body'    => wp_json_encode($body),
   ]);
@@ -21,7 +24,9 @@ function weo_api_post($endpoint, $body = []) {
 
 function weo_api_get($endpoint) {
   $base = rtrim(weo_get_option('api_base'), '/');
-  $resp = wp_remote_get("$base$endpoint", ['timeout'=>20]);
+  $key  = weo_get_option('api_key','');
+  $headers = $key ? ['x-api-key'=>$key] : [];
+  $resp = wp_remote_get("$base$endpoint", ['timeout'=>20,'headers'=>$headers]);
   if (is_wp_error($resp)) return $resp;
   $code = wp_remote_retrieve_response_code($resp);
   $json = json_decode(wp_remote_retrieve_body($resp), true);
