@@ -15,7 +15,7 @@ class WEO_Order {
   }
 
   /** Escrow-Adresse erzeugen (z.B. beim Wechsel in on-hold) */
-  public function maybe_create_escrow($order_id, $from, $to, $order) {
+  public static function maybe_create_escrow($order_id, $from, $to, $order) {
     if (!$order instanceof WC_Order) $order = wc_get_order($order_id);
     if (!$order) return;
 
@@ -29,11 +29,11 @@ class WEO_Order {
     if (!$buyer_xpub || !$vendor_xpub || !$escrow_xpub) return;
 
     // Betrag in sats (optional – reine Info für API; echtes UTXO-Tracking macht Core)
-    // Falls du fiat Preise nutzt, ersetz die Umrechnung hier sinnvoll (oder entferne amount_sat)
-    $amount_sat = 0;
+    // Der Shop muss in BTC rechnen – andernfalls hier eine passende Umrechnung ergänzen
+    $total_btc  = floatval($order->get_total());
+    $amount_sat = intval( round( $total_btc * 100000000 ) );
+    if (!weo_validate_amount($amount_sat)) $amount_sat = 0;
 
-    // deterministischer Index pro Order
-    $index   = abs(crc32('weo-'.$order->get_order_number())) % 1000000;
     $min_conf = intval(weo_get_option('min_conf',2));
 
     $oid = weo_sanitize_order_id((string)$order->get_order_number());
@@ -44,14 +44,18 @@ class WEO_Order {
       'buyer'      => ['xpub'=>$buyer_xpub],
       'seller'     => ['xpub'=>$vendor_xpub],
       'escrow'     => ['xpub'=>$escrow_xpub],
-      'index'      => $index,
       'min_conf'   => $min_conf
     ]);
 
-    if (!is_wp_error($res)) {
-      if (!empty($res['escrow_address'])) $order->update_meta_data('_weo_escrow_addr', $res['escrow_address']);
-      if (!empty($res['watch_id']))       $order->update_meta_data('_weo_watch_id',    $res['watch_id']);
+    if (!is_wp_error($res) && !empty($res['escrow_address']) && !empty($res['watch_id'])) {
+      $order->update_meta_data('_weo_escrow_addr', $res['escrow_address']);
+      $order->update_meta_data('_weo_watch_id',    $res['watch_id']);
       $order->save();
+    } else {
+      $order->add_order_note('Escrow-Service nicht erreichbar – erneuter Versuch in 5 Minuten.');
+      if (!wp_next_scheduled('weo_retry_create_escrow', [$order_id])) {
+        wp_schedule_single_event(time()+300, 'weo_retry_create_escrow', [$order_id]);
+      }
     }
   }
 
@@ -75,9 +79,16 @@ class WEO_Order {
     // Status von API holen
     $oid = weo_sanitize_order_id((string)$order->get_order_number());
     $status  = weo_api_get('/orders/'.rawurlencode($oid).'/status');
-    $funding = is_wp_error($status) ? null : ($status['funding'] ?? null);
-    $state   = is_wp_error($status) ? 'unknown' : ($status['state'] ?? 'unknown');
-    $deadline = is_wp_error($status) ? 0 : intval($status['deadline_ts'] ?? 0);
+    if (is_wp_error($status)) {
+      echo '<p class="weo-error">Escrow-Status derzeit nicht abrufbar. Bitte später erneut versuchen.</p>';
+      $funding = null;
+      $state = 'unknown';
+      $deadline = 0;
+    } else {
+      $funding = $status['funding'] ?? null;
+      $state   = $status['state'] ?? 'unknown';
+      $deadline = intval($status['deadline_ts'] ?? 0);
+    }
 
     // Stepper
     $labels = [
@@ -383,7 +394,22 @@ class WEO_Order {
 
           if (!empty($resp) && !is_wp_error($resp) && !empty($resp['psbt'])) {
             $psbt_b64 = esc_textarea($resp['psbt']);
-            echo '<div class="notice weo weo-info"><p><strong>PSBT (Base64):</strong></p><textarea rows="6" style="width:100%;">'.$psbt_b64.'</textarea><p>Bitte in deiner Wallet laden, signieren und unten wieder hochladen.</p></div>';
+            $details = '';
+            $dec = weo_api_post('/psbt/decode', [ 'psbt' => $resp['psbt'] ]);
+            if (!is_wp_error($dec)) {
+              $outs = $dec['outputs'] ?? [];
+              if ($outs) {
+                $details .= '<p><strong>'.esc_html__('Outputs','weo').':</strong></p><ul>';
+                foreach ($outs as $addr => $sats) {
+                  $details .= '<li>'.esc_html($addr).' – '.esc_html(number_format_i18n($sats)).' sats</li>';
+                }
+                $details .= '</ul>';
+              }
+              if (isset($dec['fee_sat'])) {
+                $details .= '<p><strong>'.esc_html__('Gebühr','weo').':</strong> '.esc_html(number_format_i18n(intval($dec['fee_sat']))).' sats</p>';
+              }
+            }
+            echo '<div class="notice weo weo-info"><p><strong>PSBT (Base64):</strong></p><textarea rows="6" style="width:100%;">'.$psbt_b64.'</textarea>'.$details.'<p>Bitte in deiner Wallet laden, signieren und unten wieder hochladen.</p></div>';
           } elseif ($resp !== null) {
             echo '<div class="notice weo weo-error"><p>PSBT konnte nicht erstellt werden.</p></div>';
           }
@@ -432,6 +458,7 @@ class WEO_Order {
       'partials' => $all_partials
     ]);
     if (is_wp_error($merge) || empty($merge['psbt'])) {
+      wc_add_notice('PSBT konnte nicht zusammengeführt werden. Bitte später erneut versuchen.', 'error');
       wp_safe_redirect(wp_get_referer()); exit;
     }
 
@@ -468,6 +495,8 @@ class WEO_Order {
       $order->delete_meta_data('_weo_dispute');
       $order->delete_meta_data('_weo_dispute_outcome');
       $order->save();
+    } else {
+      wc_add_notice('Broadcast fehlgeschlagen. Bitte Support kontaktieren.', 'error');
     }
 
     wp_safe_redirect(wp_get_referer()); exit;
@@ -488,39 +517,18 @@ class WEO_Order {
 
     $note = sanitize_textarea_field($_POST['weo_dispute_note'] ?? '');
 
-    $all_partials = array_merge(
-      (array)$order->get_meta('_weo_psbt_partials_buyer'),
-      (array)$order->get_meta('_weo_psbt_partials_seller')
-    );
-    $psbt = '';
     $oid = weo_sanitize_order_id((string)$order->get_order_number());
-    if ($all_partials) {
-      $merge = weo_api_post('/psbt/merge', [
-        'order_id' => $oid,
-        'partials' => $all_partials
-      ]);
-      if (!is_wp_error($merge) && !empty($merge['psbt'])) $psbt = $merge['psbt'];
-    }
-
-    if ($psbt) {
-      $final = weo_api_post('/psbt/finalize', [
-        'order_id' => $oid,
-        'psbt'     => $psbt,
-        'state'    => 'dispute'
-      ]);
-      if (!is_wp_error($final) && !empty($final['hex'])) {
-        weo_api_post('/tx/broadcast', [
-          'hex'      => $final['hex'],
-          'order_id' => $oid,
-          'state'    => 'dispute'
-        ]);
+    $res = weo_api_post('/psbt/finalize', [
+      'order_id' => $oid,
+      'psbt'     => '',
+      'state'    => 'dispute'
+    ]);
+    if (is_wp_error($res)) {
+      $order->add_order_note('Dispute-Anmeldung beim Escrow-Service fehlgeschlagen – erneuter Versuch in 5 Minuten.');
+      wc_add_notice('Escrow-Service aktuell nicht erreichbar. Der Dispute wird später automatisch gemeldet.', 'error');
+      if (!wp_next_scheduled('weo_retry_finalize_dispute', [$order_id])) {
+        wp_schedule_single_event(time()+300, 'weo_retry_finalize_dispute', [$order_id]);
       }
-    } else {
-      weo_api_post('/psbt/finalize', [
-        'order_id' => $oid,
-        'psbt'     => '',
-        'state'    => 'dispute'
-      ]);
     }
 
     $order->update_status('on-hold', 'Dispute eröffnet');
@@ -531,6 +539,23 @@ class WEO_Order {
     do_action('weo_dispute_opened', $order);
 
     wp_safe_redirect(wp_get_referer()); exit;
+  }
+
+  public static function retry_create_escrow($order_id) {
+    self::maybe_create_escrow($order_id, 'pending', 'on-hold', null);
+  }
+
+  public static function retry_finalize_dispute($order_id) {
+    $order = wc_get_order($order_id); if (!$order) return;
+    $oid = weo_sanitize_order_id((string)$order->get_order_number());
+    $res = weo_api_post('/psbt/finalize', [
+      'order_id' => $oid,
+      'psbt'     => '',
+      'state'    => 'dispute'
+    ]);
+    if (is_wp_error($res) && !wp_next_scheduled('weo_retry_finalize_dispute', [$order_id])) {
+      wp_schedule_single_event(time()+300, 'weo_retry_finalize_dispute', [$order_id]);
+    }
   }
 
   /** Admin-Metabox */
@@ -567,3 +592,6 @@ class WEO_Order {
     return get_option('weo_vendor_payout_fallback','bc1qexamplefallbackaddressxxxxxxxxxxxxxxxxxx');
   }
 }
+
+add_action('weo_retry_create_escrow', ['WEO_Order','retry_create_escrow']);
+add_action('weo_retry_finalize_dispute', ['WEO_Order','retry_finalize_dispute']);

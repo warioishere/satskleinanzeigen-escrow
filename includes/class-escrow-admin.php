@@ -180,6 +180,18 @@ class WEO_Admin {
       echo '<input type="hidden" name="weo_action" value="close_dispute">';
       echo '<button class="button">Close</button>';
       echo '</form>';
+      $outcome = $order->get_meta('_weo_dispute_outcome');
+      $need_key = $outcome === 'payout' ? '_weo_psbt_partials_seller' : ($outcome === 'refund' ? '_weo_psbt_partials_buyer' : '');
+      $has_sig = $need_key ? !empty($order->get_meta($need_key)) : false;
+      if ($outcome && $has_sig) {
+        echo '<form method="post" style="display:inline;margin-right:4px;">';
+        echo '<input type="hidden" name="order_id" value="'.intval($order->get_id()).'">';
+        echo '<input type="hidden" name="weo_nonce" value="'.$nonce.'">';
+        echo '<input type="hidden" name="weo_action" value="finalize_dispute">';
+        echo '<input type="text" name="weo_admin_psbt" placeholder="Admin PSBT" style="width:200px;margin-right:4px;">';
+        echo '<button class="button">Broadcast</button>';
+        echo '</form>';
+      }
       echo '</td>';
       echo '</tr>';
     }
@@ -211,6 +223,64 @@ class WEO_Admin {
       $order->update_status('on-hold', 'Dispute geschlossen');
       $order->save();
       echo '<div class="notice notice-success"><p>Dispute geschlossen.</p></div>';
+      return;
+    }
+
+    if ($action === 'finalize_dispute') {
+      $oid = weo_sanitize_order_id((string)$order->get_order_number());
+      $admin_psbt = trim($_POST['weo_admin_psbt'] ?? '');
+      if (!$admin_psbt) {
+        echo '<div class="notice notice-error"><p>Signierte PSBT fehlt.</p></div>';
+        return;
+      }
+      $outcome = $order->get_meta('_weo_dispute_outcome');
+      $party_key = $outcome === 'payout' ? '_weo_psbt_partials_seller' : ($outcome === 'refund' ? '_weo_psbt_partials_buyer' : '');
+      if (!$party_key) {
+        echo '<div class="notice notice-error"><p>Unbekanntes Dispute-Ergebnis.</p></div>';
+        return;
+      }
+      $party_parts = (array)$order->get_meta($party_key);
+      if (!$party_parts) {
+        echo '<div class="notice notice-error"><p>Signatur der Gegenpartei fehlt.</p></div>';
+        return;
+      }
+      $partials = array_merge($party_parts, [$admin_psbt]);
+      $merge = weo_api_post('/psbt/merge', [
+        'order_id' => $oid,
+        'partials' => $partials
+      ]);
+      if (is_wp_error($merge) || empty($merge['psbt'])) {
+        echo '<div class="notice notice-error"><p>PSBT-Zusammenführung fehlgeschlagen.</p></div>';
+        return;
+      }
+      $final = weo_api_post('/psbt/finalize', [
+        'order_id' => $oid,
+        'psbt'     => $merge['psbt'],
+        'state'    => 'dispute'
+      ]);
+      if (is_wp_error($final) || empty($final['hex'])) {
+        echo '<div class="notice notice-error"><p>Finalisierung fehlgeschlagen.</p></div>';
+        return;
+      }
+      $tx = weo_api_post('/tx/broadcast', [
+        'hex'      => $final['hex'],
+        'order_id' => $oid,
+        'state'    => 'dispute'
+      ]);
+      if (!is_wp_error($tx) && !empty($tx['txid'])) {
+        $order->update_meta_data('_weo_payout_txid', $tx['txid']);
+        if ($outcome === 'refund') {
+          $order->update_status('refunded', 'Escrow erstattet. TXID: '.$tx['txid']);
+        } else {
+          $order->update_status('completed', 'Escrow ausgezahlt. TXID: '.$tx['txid']);
+        }
+        $order->delete_meta_data('_weo_dispute');
+        $order->delete_meta_data('_weo_dispute_outcome');
+        $order->save();
+        echo '<div class="notice notice-success"><p>Transaktion gesendet.</p></div>';
+      } else {
+        echo '<div class="notice notice-error"><p>Broadcast fehlgeschlagen.</p></div>';
+      }
       return;
     }
 
@@ -289,7 +359,22 @@ class WEO_Admin {
       }
       $order->save();
       $psbt_b64 = esc_textarea($resp['psbt']);
-      echo '<div class="notice notice-info"><p><strong>PSBT (Base64):</strong></p><textarea rows="4" style="width:100%;">'.$psbt_b64.'</textarea></div>';
+      $details = '';
+      $dec = weo_api_post('/psbt/decode', [ 'psbt' => $resp['psbt'] ]);
+      if (!is_wp_error($dec)) {
+        $outs = $dec['outputs'] ?? [];
+        if ($outs) {
+          $details .= '<p><strong>'.esc_html__('Outputs','weo').':</strong></p><ul>';
+          foreach ($outs as $addr => $sats) {
+            $details .= '<li>'.esc_html($addr).' – '.esc_html(number_format_i18n($sats)).' sats</li>';
+          }
+          $details .= '</ul>';
+        }
+        if (isset($dec['fee_sat'])) {
+          $details .= '<p><strong>'.esc_html__('Gebühr','weo').':</strong> '.esc_html(number_format_i18n(intval($dec['fee_sat']))).' sats</p>';
+        }
+      }
+      echo '<div class="notice notice-info"><p><strong>PSBT (Base64):</strong></p><textarea rows="4" style="width:100%;">'.$psbt_b64.'</textarea>'.$details.'</div>';
     } elseif ($resp !== null) {
       echo '<div class="notice notice-error"><p>PSBT konnte nicht erstellt werden.</p></div>';
     }

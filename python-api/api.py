@@ -3,7 +3,7 @@ from typing import Any, Dict, List, Optional
 from fastapi import FastAPI, HTTPException, Header, Depends, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import PlainTextResponse
-from pydantic import BaseModel, Field, validator, root_validator, constr
+from pydantic import BaseModel, Field, field_validator, constr
 import re, base64
 import requests
 from dotenv import load_dotenv
@@ -95,7 +95,7 @@ STATES = [
 
 STATE_TRANSITIONS = {
     "awaiting_deposit": {"escrow_funded"},
-    "escrow_funded": {"signing"},
+    "escrow_funded": {"signing", "dispute"},
     "signing": {"completed", "refunded", "dispute"},
     "completed": set(),
     "refunded": set(),
@@ -193,17 +193,18 @@ def rpc(method: str, params: List[Any] = None) -> Any:
 
 # ---- Models ----
 class Party(BaseModel):
-    xpub: constr(strip_whitespace=True, regex=r'^[A-Za-z0-9]+$')
+    xpub: constr(strip_whitespace=True, pattern=r'^[A-Za-z0-9]+$')
 
-OrderID = constr(regex=r'^[A-Za-z0-9_-]{1,32}$')
+OrderID = constr(pattern=r'^[A-Za-z0-9_-]{1,32}$')
 
 class CreateOrderReq(BaseModel):
     order_id: OrderID
     buyer: Party
     seller: Party
     escrow: Party
-    index: int = Field(..., ge=0)
+    index: Optional[int] = Field(None, ge=0)
     min_conf: int = Field(2, ge=0, le=100)
+    amount_sat: int = Field(..., ge=0)
 
 class CreateOrderRes(BaseModel):
     escrow_address: str
@@ -221,7 +222,7 @@ class PSBTBuildReq(BaseModel):
     rbf: bool = True
     target_conf: int = Field(3, ge=1, le=100)
 
-    @validator('outputs')
+    @field_validator('outputs')
     def _check_outputs(cls, v):
         addr_re = re.compile(r'^(bc1|tb1)[0-9ac-hj-np-z]{8,87}$')
         for addr, amt in v.items():
@@ -233,12 +234,12 @@ class PSBTBuildReq(BaseModel):
 
 class PSBTRefundReq(BaseModel):
     order_id: OrderID
-    address: constr(strip_whitespace=True, regex=r'^(bc1|tb1)[0-9ac-hj-np-z]{8,87}$')
+    address: constr(strip_whitespace=True, pattern=r'^(bc1|tb1)[0-9ac-hj-np-z]{8,87}$')
     rbf: bool = True
     target_conf: int = Field(3, ge=1, le=100)
 
 class PayoutQuoteReq(BaseModel):
-    address: constr(strip_whitespace=True, regex=r'^(bc1|tb1)[0-9ac-hj-np-z]{8,87}$')
+    address: constr(strip_whitespace=True, pattern=r'^(bc1|tb1)[0-9ac-hj-np-z]{8,87}$')
     rbf: bool = True
     target_conf: int = Field(3, ge=1, le=100)
 
@@ -253,23 +254,24 @@ class MergeReq(BaseModel):
     order_id: Optional[OrderID] = None
     partials: List[str]
 
-    @validator('partials', each_item=True)
+    @field_validator('partials')
     def _check_part(cls, v):
-        try:
-            base64.b64decode(v, validate=True)
-        except Exception:
-            raise ValueError('invalid psbt fragment')
+        for item in v:
+            try:
+                base64.b64decode(item, validate=True)
+            except Exception:
+                raise ValueError('invalid psbt fragment')
         return v
 
 class FinalizeReq(BaseModel):
     order_id: Optional[OrderID] = None
     psbt: str
-    state: str = Field("completed", regex=r'^(completed|refunded|dispute)$')
+    state: str = Field("completed", pattern=r'^(completed|refunded|dispute)$')
 
 class BroadcastReq(BaseModel):
     hex: str
     order_id: Optional[OrderID] = None
-    state: str = Field("completed", regex=r'^(completed|refunded|dispute)$')
+    state: str = Field("completed", pattern=r'^(completed|refunded|dispute)$')
 
 class BumpFeeReq(BaseModel):
     order_id: OrderID
@@ -280,6 +282,8 @@ class DecodeReq(BaseModel):
 
 class DecodeRes(BaseModel):
     sign_count: int
+    outputs: Dict[str, int]
+    fee_sat: int
 
 # ---- Webhook worker ----
 
@@ -446,7 +450,8 @@ def create_order(body: CreateOrderReq):
             watch_id=f"escrow_{body.order_id}_{existing['index']}"
         )
 
-    desc = build_descriptor(body.buyer.xpub, body.seller.xpub, body.escrow.xpub, body.index)
+    idx = body.index if body.index is not None else db.next_index()
+    desc = build_descriptor(body.buyer.xpub, body.seller.xpub, body.escrow.xpub, idx)
     info = rpc("getdescriptorinfo", [desc])
     desc_ck = f"{desc}#{info['checksum']}"
     label = f"escrow:{body.order_id}"
@@ -457,15 +462,15 @@ def create_order(body: CreateOrderReq):
         "label": label,
         "internal": False,
         "active": False,
-        "range": [body.index, body.index]
+        "range": [idx, idx]
     }]])
-    addr = rpc("deriveaddresses", [desc_ck, [body.index, body.index]])[0]
+    addr = rpc("deriveaddresses", [desc_ck, [idx, idx]])[0]
 
-    db.upsert_order(body.order_id, desc_ck, body.index, body.min_conf, label)
+    db.upsert_order(body.order_id, desc_ck, idx, body.min_conf, label, body.amount_sat)
     return CreateOrderRes(
         escrow_address=addr,
         descriptor=desc_ck,
-        watch_id=f"escrow_{body.order_id}_{body.index}"
+        watch_id=f"escrow_{body.order_id}_{idx}"
     )
 
 @app.get("/orders/{order_id}/status", response_model=StatusRes, dependencies=[Depends(require_api_key)])
@@ -500,7 +505,7 @@ def order_status(order_id: str):
 
     state = meta["state"]
     expected = int(meta.get("amount_sat") or 0)
-    if min_conf is not None and min_conf >= int(meta["min_conf"]) and total_sat >= expected:
+    if expected > 0 and min_conf is not None and min_conf >= int(meta["min_conf"]) and total_sat >= expected:
         changed = advance_state(meta, "escrow_funded", min_conf)
         state = "escrow_funded"
         if changed:
@@ -617,12 +622,20 @@ def psbt_merge(body: MergeReq):
 @app.post("/psbt/decode", response_model=DecodeRes, dependencies=[Depends(require_api_key)])
 def psbt_decode(body: DecodeReq):
     dec = rpc("decodepsbt", [body.psbt])
+    vout = dec.get("tx", {}).get("vout", [])
+    outs: Dict[str, int] = {}
+    for o in vout:
+        addrs = o.get("scriptPubKey", {}).get("addresses", [])
+        if addrs:
+            outs[addrs[0]] = int(round(o.get("value", 0) * 1e8))
+    ana = rpc("analyzepsbt", [body.psbt])
+    fee_sat = int(round(ana.get("fee", 0) * 1e8)) if ana.get("fee") is not None else 0
     inputs = dec.get("inputs", [])
     count = 0
     if inputs:
         sigs = inputs[0].get("partial_signatures") or {}
         count = len(sigs)
-    return DecodeRes(sign_count=count)
+    return DecodeRes(sign_count=count, outputs=outs, fee_sat=fee_sat)
 
 @app.post("/psbt/finalize", dependencies=[Depends(require_api_key)])
 def psbt_finalize(body: FinalizeReq):

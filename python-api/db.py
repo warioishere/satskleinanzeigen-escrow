@@ -21,6 +21,7 @@ def init_db():
             index INTEGER,
             min_conf INTEGER,
             label TEXT,
+            amount_sat INTEGER,
             created_at INTEGER,
             state TEXT,
             funding_txid TEXT,
@@ -44,24 +45,35 @@ def init_db():
         cur.execute("ALTER TABLE orders ADD COLUMN payout_txid TEXT")
     if "deadline_ts" not in cols:
         cur.execute("ALTER TABLE orders ADD COLUMN deadline_ts INTEGER")
+    if "amount_sat" not in cols:
+        cur.execute("ALTER TABLE orders ADD COLUMN amount_sat INTEGER")
     conn.commit()
     conn.close()
 
 
-def upsert_order(order_id: str, descriptor: str, index: int, min_conf: int, label: str):
+def next_index() -> int:
+    conn = get_conn()
+    cur = conn.execute("SELECT MAX(index) FROM orders")
+    row = cur.fetchone()
+    conn.close()
+    return (row[0] + 1) if row and row[0] is not None else 0
+
+
+def upsert_order(order_id: str, descriptor: str, index: int, min_conf: int, label: str, amount_sat: int):
     conn = get_conn()
     now = int(time.time())
     conn.execute(
         """
-        INSERT INTO orders(order_id, descriptor, index, min_conf, label, created_at, state)
-        VALUES(?,?,?,?,?,?,?)
+        INSERT INTO orders(order_id, descriptor, index, min_conf, label, amount_sat, created_at, state)
+        VALUES(?,?,?,?,?,?,?,?)
         ON CONFLICT(order_id) DO UPDATE SET
             descriptor=excluded.descriptor,
             index=excluded.index,
             min_conf=excluded.min_conf,
-            label=excluded.label
+            label=excluded.label,
+            amount_sat=excluded.amount_sat
         """,
-        (order_id, descriptor, index, min_conf, label, now, "awaiting_deposit"),
+        (order_id, descriptor, index, min_conf, label, amount_sat, now, "awaiting_deposit"),
     )
     conn.commit()
     conn.close()
