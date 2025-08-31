@@ -1,0 +1,203 @@
+import os, sqlite3, time, json
+from typing import Any, Dict, List, Optional
+
+DB_PATH = os.getenv("ORDERS_DB", "orders.sqlite")
+
+
+def get_conn():
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    return conn
+
+
+def init_db():
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute(
+        """
+        CREATE TABLE IF NOT EXISTS orders (
+            order_id TEXT PRIMARY KEY,
+            descriptor TEXT,
+            index INTEGER,
+            min_conf INTEGER,
+            label TEXT,
+            created_at INTEGER,
+            state TEXT,
+            funding_txid TEXT,
+            vout INTEGER,
+            confirmations INTEGER,
+            partials TEXT,
+            outputs TEXT,
+            output_type TEXT,
+            last_webhook_ts INTEGER,
+            payout_txid TEXT,
+            deadline_ts INTEGER
+        )
+        """,
+    )
+    cols = [r[1] for r in cur.execute("PRAGMA table_info(orders)")]
+    if "outputs" not in cols:
+        cur.execute("ALTER TABLE orders ADD COLUMN outputs TEXT")
+    if "output_type" not in cols:
+        cur.execute("ALTER TABLE orders ADD COLUMN output_type TEXT")
+    if "payout_txid" not in cols:
+        cur.execute("ALTER TABLE orders ADD COLUMN payout_txid TEXT")
+    if "deadline_ts" not in cols:
+        cur.execute("ALTER TABLE orders ADD COLUMN deadline_ts INTEGER")
+    conn.commit()
+    conn.close()
+
+
+def upsert_order(order_id: str, descriptor: str, index: int, min_conf: int, label: str):
+    conn = get_conn()
+    now = int(time.time())
+    conn.execute(
+        """
+        INSERT INTO orders(order_id, descriptor, index, min_conf, label, created_at, state)
+        VALUES(?,?,?,?,?,?,?)
+        ON CONFLICT(order_id) DO UPDATE SET
+            descriptor=excluded.descriptor,
+            index=excluded.index,
+            min_conf=excluded.min_conf,
+            label=excluded.label
+        """,
+        (order_id, descriptor, index, min_conf, label, now, "awaiting_deposit"),
+    )
+    conn.commit()
+    conn.close()
+
+
+def get_order(order_id: str) -> Optional[Dict[str, Any]]:
+    conn = get_conn()
+    cur = conn.execute("SELECT * FROM orders WHERE order_id=?", (order_id,))
+    row = cur.fetchone()
+    conn.close()
+    return dict(row) if row else None
+
+
+def get_partials(order_id: str) -> List[str]:
+    conn = get_conn()
+    cur = conn.execute("SELECT partials FROM orders WHERE order_id=?", (order_id,))
+    row = cur.fetchone()
+    conn.close()
+    if not row or not row["partials"]:
+        return []
+    try:
+        return json.loads(row["partials"])
+    except Exception:
+        return []
+
+
+def update_state(
+    order_id: str,
+    state: str,
+    confirmations: Optional[int] = None,
+    deadline: Optional[int] = None,
+):
+    conn = get_conn()
+    now = int(time.time())
+    fields = ["state=?", "created_at=?"]
+    params: List[Any] = [state, now]
+    if confirmations is not None:
+        fields.append("confirmations=?")
+        params.append(confirmations)
+    if deadline is not None:
+        fields.append("deadline_ts=?")
+        params.append(deadline)
+    sql = f"UPDATE orders SET {', '.join(fields)} WHERE order_id=?"
+    params.append(order_id)
+    conn.execute(sql, params)
+    conn.commit()
+    conn.close()
+
+
+def save_partials(order_id: str, partials: List[str]):
+    conn = get_conn()
+    conn.execute(
+        "UPDATE orders SET partials=? WHERE order_id=?",
+        (json.dumps(partials), order_id),
+    )
+    conn.commit()
+    conn.close()
+
+
+def set_outputs(order_id: str, outputs: Dict[str, int], output_type: str):
+    conn = get_conn()
+    conn.execute(
+        "UPDATE orders SET outputs=?, output_type=? WHERE order_id=?",
+        (json.dumps(outputs), output_type, order_id),
+    )
+    conn.commit()
+    conn.close()
+
+
+def get_outputs(order_id: str) -> Dict[str, int]:
+    conn = get_conn()
+    cur = conn.execute("SELECT outputs FROM orders WHERE order_id=?", (order_id,))
+    row = cur.fetchone()
+    conn.close()
+    if not row or not row["outputs"]:
+        return {}
+    try:
+        return json.loads(row["outputs"])
+    except Exception:
+        return {}
+
+
+def update_funding(order_id: str, txid: str, vout: int, confirmations: int):
+    conn = get_conn()
+    conn.execute(
+        "UPDATE orders SET funding_txid=?, vout=?, confirmations=? WHERE order_id=?",
+        (txid, vout, confirmations, order_id),
+    )
+    conn.commit()
+    conn.close()
+
+
+def set_last_webhook_ts(order_id: str, ts: int):
+    conn = get_conn()
+    conn.execute(
+        "UPDATE orders SET last_webhook_ts=? WHERE order_id=?",
+        (ts, order_id),
+    )
+    conn.commit()
+    conn.close()
+
+
+def set_payout_txid(order_id: str, txid: str):
+    conn = get_conn()
+    conn.execute(
+        "UPDATE orders SET payout_txid=? WHERE order_id=?",
+        (txid, order_id),
+    )
+    conn.commit()
+    conn.close()
+
+
+def count_pending_signatures() -> int:
+    conn = get_conn()
+    cur = conn.execute("SELECT partials FROM orders WHERE state='signing'")
+    rows = cur.fetchall()
+    conn.close()
+    pending = 0
+    for r in rows:
+        try:
+            parts = json.loads(r["partials"]) if r["partials"] else []
+        except Exception:
+            parts = []
+        if len(parts) < 2:
+            pending += 2 - len(parts)
+    return pending
+
+
+def list_orders_by_states(states: List[str]) -> List[Dict[str, Any]]:
+    conn = get_conn()
+    qmarks = ",".join(["?"] * len(states))
+    cur = conn.execute(
+        f"SELECT * FROM orders WHERE state IN ({qmarks})",
+        states,
+    )
+    rows = cur.fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+

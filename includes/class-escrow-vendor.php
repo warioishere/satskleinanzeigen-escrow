@@ -12,20 +12,36 @@ class WEO_Vendor {
 
   public function field($user) {
     if (!user_can($user,'vendor') && !user_can($user,'seller')) return;
-    $xpub = get_user_meta($user->ID,'weo_vendor_xpub',true);
+    $xpub   = get_user_meta($user->ID,'weo_vendor_xpub',true);
+    $payout = get_user_meta($user->ID,'weo_vendor_payout_address',true);
     ?>
     <h3>Escrow xpub (Verkäufer)</h3>
-    <table class="form-table"><tr>
-      <th><label for="weo_vendor_xpub">Vendor xpub</label></th>
-      <td><input type="text" class="regular-text code" name="weo_vendor_xpub" id="weo_vendor_xpub" value="<?php echo esc_attr($xpub); ?>"></td>
-    </tr></table>
+    <table class="form-table">
+      <tr>
+        <th><label for="weo_vendor_xpub">Vendor xpub</label></th>
+        <td><input type="text" class="regular-text code" name="weo_vendor_xpub" id="weo_vendor_xpub" value="<?php echo esc_attr($xpub); ?>"></td>
+      </tr>
+      <tr>
+        <th><label for="weo_vendor_payout_address">Payout-Adresse</label></th>
+        <td><input type="text" class="regular-text code" name="weo_vendor_payout_address" id="weo_vendor_payout_address" value="<?php echo esc_attr($payout); ?>"></td>
+      </tr>
+    </table>
     <?php
   }
 
   public function save($user_id) {
     if (!current_user_can('edit_user',$user_id)) return;
     if (isset($_POST['weo_vendor_xpub'])) {
-      update_user_meta($user_id,'weo_vendor_xpub', weo_sanitize_xpub(wp_unslash($_POST['weo_vendor_xpub'])));
+      $norm = weo_normalize_xpub(wp_unslash($_POST['weo_vendor_xpub']));
+      if (!is_wp_error($norm)) {
+        update_user_meta($user_id,'weo_vendor_xpub', $norm);
+      }
+    }
+    if (isset($_POST['weo_vendor_payout_address'])) {
+      $addr = wp_unslash($_POST['weo_vendor_payout_address']);
+      if (weo_validate_btc_address($addr)) {
+        update_user_meta($user_id,'weo_vendor_payout_address', weo_sanitize_btc_address($addr));
+      }
     }
   }
 

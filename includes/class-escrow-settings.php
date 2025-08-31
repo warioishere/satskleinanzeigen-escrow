@@ -13,6 +13,9 @@ class WEO_Settings {
     add_settings_field('api_base', 'Escrow-API Base URL', [$this,'field_api'], 'weo', 'weo_main');
     add_settings_field('escrow_xpub', 'Escrow xpub (dein Key)', [$this,'field_xpub'], 'weo', 'weo_main');
     add_settings_field('min_conf', 'Min. Bestätigungen', [$this,'field_conf'], 'weo', 'weo_main');
+    add_settings_field('api_key', 'API Key', [$this,'field_api_key'], 'weo', 'weo_main');
+    add_settings_field('hmac_secret', 'Webhook HMAC Secret', [$this,'field_hmac_secret'], 'weo', 'weo_main');
+    add_settings_field('timeout_days', 'Signatur-Timeout (Tage)', [$this,'field_timeout'], 'weo', 'weo_main');
   }
 
   public function sanitize($opts) {
@@ -20,6 +23,9 @@ class WEO_Settings {
     $clean['api_base']   = esc_url_raw($opts['api_base'] ?? '');
     $clean['escrow_xpub']= weo_sanitize_xpub($opts['escrow_xpub'] ?? '');
     $clean['min_conf']   = max(0, intval($opts['min_conf'] ?? 1));
+    $clean['api_key']    = sanitize_text_field($opts['api_key'] ?? '');
+    $clean['hmac_secret']= sanitize_text_field($opts['hmac_secret'] ?? '');
+    $clean['timeout_days']= max(1, intval($opts['timeout_days'] ?? 7));
     return $clean;
   }
 
@@ -38,6 +44,21 @@ class WEO_Settings {
   public function field_conf() {
     $v = intval(weo_get_option('min_conf',2));
     echo "<input type='number' name='".WEO_OPT."[min_conf]' value='$v' min='0' max='6' />";
+  }
+
+  public function field_api_key() {
+    $v = esc_attr(weo_get_option('api_key',''));
+    echo "<input type='text' name='".WEO_OPT."[api_key]' value='$v' class='regular-text' />";
+  }
+
+  public function field_hmac_secret() {
+    $v = esc_attr(weo_get_option('hmac_secret',''));
+    echo "<input type='text' name='".WEO_OPT."[hmac_secret]' value='$v' class='regular-text' />"; 
+  }
+
+  public function field_timeout() {
+    $v = intval(weo_get_option('timeout_days',7));
+    echo "<input type='number' name='".WEO_OPT."[timeout_days]' value='$v' min='1' />"; 
   }
 
   public function render() { ?>
