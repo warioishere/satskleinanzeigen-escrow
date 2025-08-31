@@ -567,9 +567,28 @@ def psbt_build(body: PSBTBuildReq):
         raise HTTPException(400, "no funded utxo")
 
     ins = [{"txid": u["txid"], "vout": u["vout"]} for u in utxos]
-    outs_btc: List[Dict[str,float]] = [{addr: sats/1e8} for addr, sats in body.outputs.items()]
-    psbt = rpc("createpsbt", [ins, outs_btc, 0, True])
-    db.set_outputs(body.order_id, body.outputs, "payout")
+    outs_btc = {addr: sats / 1e8 for addr, sats in body.outputs.items()}
+    opts = {
+        "includeWatching": True,
+        "replaceable": body.rbf,
+        "conf_target": body.target_conf,
+        "subtractFeeFromOutputs": [0],
+    }
+    res = rpc("walletcreatefundedpsbt", [ins, outs_btc, 0, opts])
+    if res.get("changepos", -1) != -1:
+        raise HTTPException(400, "unexpected change output")
+    psbt = res.get("psbt")
+    dec = rpc("decodepsbt", [psbt])
+    outs = dec.get("tx", {}).get("vout", [])
+    if len(outs) != len(body.outputs):
+        raise HTTPException(400, "unexpected outputs")
+    out_map: Dict[str, int] = {}
+    for o in outs:
+        addrs = o.get("scriptPubKey", {}).get("addresses", [])
+        if len(addrs) != 1 or addrs[0] not in body.outputs:
+            raise HTTPException(400, "outputs mismatch")
+        out_map[addrs[0]] = int(round(o.get("value", 0) * 1e8))
+    db.set_outputs(body.order_id, out_map, "payout")
     advance_state(meta, "signing")
     return PSBTRes(psbt=psbt)
 

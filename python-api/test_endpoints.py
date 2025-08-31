@@ -62,10 +62,11 @@ def stub_rpc(method, params=None):
         return [{'success':True}]
     if method == 'deriveaddresses':
         return ['tb1qaddr']
-    if method == 'createpsbt':
-        return 'psbt1'
     if method == 'walletcreatefundedpsbt':
-        return {'psbt':'psbtR','changepos':-1}
+        outs = params[1]
+        if outs == {'tb1qrefunded0': 0}:
+            return {'psbt':'psbtR','changepos':-1}
+        return {'psbt':'psbtP','changepos':-1}
     if method == 'decodepsbt':
         psbt=params[0]
         if psbt=='merged':
@@ -108,7 +109,7 @@ def test_full_payout_flow(monkeypatch):
     assert r.json()['state']=='escrow_funded'
     r=client.post('/psbt/build', json={'order_id':'order1','outputs':{'tb1qseller111':55000}}, headers=headers)
     assert r.status_code==200, r.text
-    assert r.json()['psbt']=='psbt1'
+    assert r.json()['psbt']=='psbtP'
     r=client.post('/psbt/merge', json={'order_id':'order1','partials':['cDE=','cDI=']}, headers=headers)
     assert r.status_code==200, r.text
     assert r.json()['psbt']=='merged'
