@@ -3,11 +3,7 @@ if (!defined('ABSPATH')) exit;
 
 class WEO_Order {
   public function __construct() {
-    add_action('woocommerce_thankyou',        [$this,'render_order_panel'], 20);
     add_action('woocommerce_view_order',      [$this,'render_order_panel'], 20);
-
-    // Adresse/Watcher beim Statuswechsel anlegen (du kannst den Trigger anpassen)
-    add_action('woocommerce_order_status_changed', [$this,'maybe_create_escrow'],10,4);
 
     // Admin-Metabox
     add_action('add_meta_boxes', [$this,'metabox']);
@@ -16,20 +12,9 @@ class WEO_Order {
     add_action('admin_post_weo_upload_psbt_buyer',  [$this,'handle_upload']);
     add_action('admin_post_weo_upload_psbt_seller', [$this,'handle_upload']);
     add_action('admin_post_weo_open_dispute',       [$this,'open_dispute']);
-
-    // Assets
-    add_action('wp_enqueue_scripts', [$this,'enqueue_assets']);
   }
 
-  /** Frontend-CSS/JS laden (nur auf Bestellseiten) */
-  public function enqueue_assets() {
-    if (is_order_received_page() || is_account_page()) {
-      wp_enqueue_style('weo-css', WEO_URL.'assets/admin.css', [], '1.0');
-      wp_enqueue_script('weo-qr',  WEO_URL.'assets/qr.min.js', [], '1.0', true);
-    }
-  }
-
-  /** Beim Wechsel in on-hold (oder wie du willst) Escrow-Adresse erzeugen */
+  /** Escrow-Adresse erzeugen (z.B. beim Wechsel in on-hold) */
   public function maybe_create_escrow($order_id, $from, $to, $order) {
     if (!$order instanceof WC_Order) $order = wc_get_order($order_id);
     if (!$order) return;
@@ -73,6 +58,7 @@ class WEO_Order {
   /** Bestellpanel (Thankyou & "Bestellung ansehen") */
   public function render_order_panel($order_id) {
     $order = wc_get_order($order_id); if (!$order) return;
+    if ($order->get_payment_method() !== 'weo_gateway') return;
 
     $addr   = $order->get_meta('_weo_escrow_addr');
     $watch  = $order->get_meta('_weo_watch_id');
@@ -132,6 +118,9 @@ class WEO_Order {
       echo '<p>Noch keine Einzahlung erkannt.</p>';
     }
     echo '<p>Status: <strong>'.esc_html($state).'</strong></p>';
+    if ($state === 'dispute') {
+      echo '<div class="notice weo weo-warning"><p>'.esc_html__('Dispute offen – bitte warte auf die Entscheidung des Administrators.','weo').'</p></div>';
+    }
     if ($deadline) {
       if ($deadline > time()) {
         $dl = intval($deadline);
@@ -142,6 +131,34 @@ class WEO_Order {
     }
     $signs = intval($order->get_meta('_weo_psbt_sign_count'));
     echo '<p>Signaturen: '. $signs . '/2</p>';
+
+    $shipped  = intval($order->get_meta('_weo_shipped'));
+    $received = intval($order->get_meta('_weo_received'));
+    echo '<p>Versand: ' . ($shipped ? date_i18n(get_option('date_format'), $shipped) : 'noch nicht bestätigt') . '</p>';
+    echo '<p>Empfang: ' . ($received ? date_i18n(get_option('date_format'), $received) : 'noch nicht bestätigt') . '</p>';
+
+    $cur      = get_current_user_id();
+    $buyer_id  = $order->get_user_id();
+    $vendor_id = $order->get_meta('_weo_vendor_id');
+    if (!$vendor_id) { $this->fallback_vendor_payout_address($order_id); $vendor_id = $order->get_meta('_weo_vendor_id'); }
+
+    if ($cur && $cur == $vendor_id && !$shipped) {
+      $n = wp_create_nonce('weo_ship_'.$order_id);
+      echo '<form method="post" action="" style="margin-top:10px;">';
+      echo '<input type="hidden" name="weo_action" value="mark_shipped">';
+      echo '<input type="hidden" name="weo_nonce" value="'.$n.'">';
+      echo '<p><button class="button">Als versendet markieren</button></p>';
+      echo '</form>';
+    }
+
+    if ($cur && $cur == $buyer_id && $shipped && !$received) {
+      $n = wp_create_nonce('weo_recv_'.$order_id);
+      echo '<form method="post" action="" style="margin-top:10px;">';
+      echo '<input type="hidden" name="weo_action" value="mark_received">';
+      echo '<input type="hidden" name="weo_nonce" value="'.$n.'">';
+      echo '<p><button class="button">Empfang bestätigen</button></p>';
+      echo '</form>';
+    }
 
     $payout_txid = $order->get_meta('_weo_payout_txid');
     if ($state === 'signing' || $payout_txid) {
@@ -156,10 +173,13 @@ class WEO_Order {
 
     if (in_array($state, ['escrow_funded','signing'])) {
       $upload_url = esc_url(admin_url('admin-post.php'));
-      echo '<form method="post" action="'.$upload_url.'" style="margin-top:10px;">';
+      $confirm = esc_js(__('Disput wirklich eröffnen? Die Bestellung wird in den Disput-Status versetzt und nur der Admin entscheidet über die Auszahlung.', 'weo'));
+      echo '<form method="post" action="'.$upload_url.'" style="margin-top:10px;" onsubmit="return confirm(\''.$confirm.'\');">';
       echo '<input type="hidden" name="action" value="weo_open_dispute">';
       echo '<input type="hidden" name="order_id" value="'.intval($order_id).'">';
-      echo '<p><button class="button">Dispute eröffnen</button></p>';
+      echo '<p><label for="weo_dispute_note_'.intval($order_id).'">'.esc_html__('Problem beschreiben','weo').'</label><br/>';
+      echo '<textarea name="weo_dispute_note" id="weo_dispute_note_'.intval($order_id).'" rows="4" style="width:100%"></textarea></p>';
+      echo '<p><button class="button">'.esc_html__('Dispute eröffnen','weo').'</button></p>';
       echo '</form>';
     }
 
@@ -176,12 +196,14 @@ class WEO_Order {
         echo '</form>';
       }
 
-      // PSBT (Refund) erstellen
-      echo '<form method="post" action="" style="margin-top:10px;">';
-      echo '<input type="hidden" name="weo_action" value="build_psbt_refund">';
-      echo '<input type="hidden" name="weo_nonce" value="'.$nonce.'">';
-      echo '<p><button class="button">PSBT (Erstattung an Käufer) erstellen</button></p>';
-      echo '</form>';
+      // PSBT (Refund) nur für Admins erstellen
+      if (current_user_can('manage_options') && $state !== 'dispute') {
+        echo '<form method="post" action="" style="margin-top:10px;">';
+        echo '<input type="hidden" name="weo_action" value="build_psbt_refund">';
+        echo '<input type="hidden" name="weo_nonce" value="'.$nonce.'">';
+        echo '<p><button class="button">PSBT (Erstattung an Käufer) erstellen</button></p>';
+        echo '</form>';
+      }
 
       // Signierte PSBT hochladen (buyer)
       $upload_url = esc_url(admin_url('admin-post.php'));
@@ -261,79 +283,110 @@ class WEO_Order {
     })();
     </script>";
 
-    // Handle PSBT-Build oder Fee-Bump direkt nach dem Panel (MVP)
-    if (!empty($_POST['weo_action']) && wp_verify_nonce($_POST['weo_nonce'],'weo_psbt_'.$order_id)) {
-      if ($_POST['weo_action'] === 'bumpfee') {
-        $target = intval($_POST['target_conf'] ?? 1);
-        $resp = weo_api_post('/tx/bumpfee', [
-          'order_id'    => (string)$order->get_order_number(),
-          'target_conf' => $target
-        ]);
-        if (!is_wp_error($resp) && !empty($resp['txid'])) {
-          $order->update_meta_data('_weo_payout_txid', $resp['txid']);
-          $order->save();
-          echo '<div class="notice weo weo-info"><p>Gebühr erhöht. Neue TXID: '.esc_html($resp['txid']).'</p></div>';
+    // Handle Actions direkt nach dem Panel (MVP)
+    if (!empty($_POST['weo_action'])) {
+      $act = sanitize_text_field($_POST['weo_action']);
+      if ($act === 'mark_shipped') {
+        if (wp_verify_nonce($_POST['weo_nonce'] ?? '', 'weo_ship_'.$order_id)) {
+          if ($cur && $cur == $vendor_id) {
+            $order->update_meta_data('_weo_shipped', time());
+            $order->save();
+            echo '<div class="notice weo weo-info"><p>Versand bestätigt.</p></div>';
+          } else {
+            echo '<div class="notice weo weo-error"><p>Keine Berechtigung.</p></div>';
+          }
         } else {
-          echo '<div class="notice weo weo-error"><p>Fee-Bump fehlgeschlagen.</p></div>';
+          echo '<div class="notice weo weo-error"><p>Ungültiger Sicherheits-Token.</p></div>';
         }
-      } else {
-        $oid = weo_sanitize_order_id((string)$order->get_order_number());
-        if ($_POST['weo_action'] === 'build_psbt_payout') {
-          $payoutAddr = get_user_meta($order->get_meta('_weo_vendor_id'), 'weo_vendor_payout_address', true);
-          if (!$payoutAddr) $payoutAddr = $this->fallback_vendor_payout_address($order_id);
-          if (!weo_validate_btc_address($payoutAddr)) {
-            echo '<div class="notice weo weo-error"><p>Payout-Adresse ungültig.</p></div>';
-            return;
+      } elseif ($act === 'mark_received') {
+        if (wp_verify_nonce($_POST['weo_nonce'] ?? '', 'weo_recv_'.$order_id)) {
+          if ($cur && $cur == $buyer_id) {
+            $order->update_meta_data('_weo_received', time());
+            $order->save();
+            echo '<div class="notice weo weo-info"><p>Empfang bestätigt.</p></div>';
+          } else {
+            echo '<div class="notice weo weo-error"><p>Keine Berechtigung.</p></div>';
           }
-          $status = weo_api_get('/orders/'.rawurlencode($oid).'/status');
-          $funded = is_wp_error($status) ? 0 : intval($status['funding']['total_sat'] ?? 0);
-          if ($funded <= 0) {
-            echo '<div class="notice weo weo-error"><p>Keine Escrow-Einzahlung gefunden.</p></div>';
-            return;
-          }
-          $quote = weo_api_post('/orders/'.rawurlencode($oid).'/payout_quote', [
-            'address'     => $payoutAddr,
-            'target_conf' => 3,
-          ]);
-          if (is_wp_error($quote) || empty($quote['payout_sat'])) {
-            echo '<div class="notice weo weo-error"><p>Fee-Kalkulation fehlgeschlagen.</p></div>';
-            return;
-          }
-          $amount_sats = intval($quote['payout_sat']);
-          if ($amount_sats <= 0 || !weo_validate_amount($amount_sats)) {
-            echo '<div class="notice weo weo-error"><p>Betrag ungültig.</p></div>';
-            return;
-          }
-          $resp = weo_api_post('/psbt/build', [
-            'order_id'    => $oid,
-            'outputs'     => [ $payoutAddr => $amount_sats ],
-            'rbf'         => true,
-            'target_conf' => 3,
-          ]);
-        } elseif ($_POST['weo_action'] === 'build_psbt_refund') {
-          $refundAddr = get_user_meta($order->get_user_id(), 'weo_buyer_payout_address', true);
-          if (!$refundAddr) {
-            echo '<div class="notice weo weo-error"><p>Keine Käuferadresse hinterlegt.</p></div>';
-            return;
-          }
-          if (!weo_validate_btc_address($refundAddr)) {
-            echo '<div class="notice weo weo-error"><p>Adresse ungültig.</p></div>';
-            return;
-          }
-          $resp = weo_api_post('/psbt/build_refund', [
-            'order_id'    => $oid,
-            'address'     => $refundAddr,
-            'target_conf' => 3
-          ]);
         } else {
-          $resp = null;
+          echo '<div class="notice weo weo-error"><p>Ungültiger Sicherheits-Token.</p></div>';
         }
+      } elseif (wp_verify_nonce($_POST['weo_nonce'] ?? '', 'weo_psbt_'.$order_id)) {
+        if ($act === 'bumpfee') {
+          $target = intval($_POST['target_conf'] ?? 1);
+          $resp = weo_api_post('/tx/bumpfee', [
+            'order_id'    => (string)$order->get_order_number(),
+            'target_conf' => $target
+          ]);
+          if (!is_wp_error($resp) && !empty($resp['txid'])) {
+            $order->update_meta_data('_weo_payout_txid', $resp['txid']);
+            $order->save();
+            echo '<div class="notice weo weo-info"><p>Gebühr erhöht. Neue TXID: '.esc_html($resp['txid']).'</p></div>';
+          } else {
+            echo '<div class="notice weo weo-error"><p>Fee-Bump fehlgeschlagen.</p></div>';
+          }
+        } else {
+          $oid = weo_sanitize_order_id((string)$order->get_order_number());
+          if ($act === 'build_psbt_payout') {
+            $payoutAddr = get_user_meta($order->get_meta('_weo_vendor_id'), 'weo_vendor_payout_address', true);
+            if (!$payoutAddr) $payoutAddr = $this->fallback_vendor_payout_address($order_id);
+            if (!weo_validate_btc_address($payoutAddr)) {
+              echo '<div class="notice weo weo-error"><p>Payout-Adresse ungültig.</p></div>';
+              return;
+            }
+            $status = weo_api_get('/orders/'.rawurlencode($oid).'/status');
+            $funded = is_wp_error($status) ? 0 : intval($status['funding']['total_sat'] ?? 0);
+            if ($funded <= 0) {
+              echo '<div class="notice weo weo-error"><p>Keine Escrow-Einzahlung gefunden.</p></div>';
+              return;
+            }
+            $quote = weo_api_post('/orders/'.rawurlencode($oid).'/payout_quote', [
+              'address'     => $payoutAddr,
+              'target_conf' => 3,
+            ]);
+            if (is_wp_error($quote) || empty($quote['payout_sat'])) {
+              echo '<div class="notice weo weo-error"><p>Fee-Kalkulation fehlgeschlagen.</p></div>';
+              return;
+            }
+            $amount_sats = intval($quote['payout_sat']);
+            if ($amount_sats <= 0 || !weo_validate_amount($amount_sats)) {
+              echo '<div class="notice weo weo-error"><p>Betrag ungültig.</p></div>';
+              return;
+            }
+            $resp = weo_api_post('/psbt/build', [
+              'order_id'    => $oid,
+              'outputs'     => [ $payoutAddr => $amount_sats ],
+              'rbf'         => true,
+              'target_conf' => 3,
+            ]);
+          } elseif ($act === 'build_psbt_refund') {
+            if (!current_user_can('manage_options')) {
+              echo '<div class="notice weo weo-error"><p>Keine Berechtigung.</p></div>';
+              return;
+            }
+            $refundAddr = get_user_meta($order->get_user_id(), 'weo_buyer_payout_address', true);
+            if (!$refundAddr) {
+              echo '<div class="notice weo weo-error"><p>Keine Käuferadresse hinterlegt.</p></div>';
+              return;
+            }
+            if (!weo_validate_btc_address($refundAddr)) {
+              echo '<div class="notice weo weo-error"><p>Adresse ungültig.</p></div>';
+              return;
+            }
+            $resp = weo_api_post('/psbt/build_refund', [
+              'order_id'    => $oid,
+              'address'     => $refundAddr,
+              'target_conf' => 3
+            ]);
+          } else {
+            $resp = null;
+          }
 
-        if (!empty($resp) && !is_wp_error($resp) && !empty($resp['psbt'])) {
-          $psbt_b64 = esc_textarea($resp['psbt']);
-          echo '<div class="notice weo weo-info"><p><strong>PSBT (Base64):</strong></p><textarea rows="6" style="width:100%;">'.$psbt_b64.'</textarea><p>Bitte in deiner Wallet laden, signieren und unten wieder hochladen.</p></div>';
-        } elseif ($resp !== null) {
-          echo '<div class="notice weo weo-error"><p>PSBT konnte nicht erstellt werden.</p></div>';
+          if (!empty($resp) && !is_wp_error($resp) && !empty($resp['psbt'])) {
+            $psbt_b64 = esc_textarea($resp['psbt']);
+            echo '<div class="notice weo weo-info"><p><strong>PSBT (Base64):</strong></p><textarea rows="6" style="width:100%;">'.$psbt_b64.'</textarea><p>Bitte in deiner Wallet laden, signieren und unten wieder hochladen.</p></div>';
+          } elseif ($resp !== null) {
+            echo '<div class="notice weo weo-error"><p>PSBT konnte nicht erstellt werden.</p></div>';
+          }
         }
       }
     }
@@ -406,7 +459,15 @@ class WEO_Order {
     ]);
     if (!is_wp_error($tx) && !empty($tx['txid'])) {
       $order->update_meta_data('_weo_payout_txid', $tx['txid']);
-      $order->update_status('completed', 'Escrow ausgezahlt. TXID: '.$tx['txid']);
+      $outcome = $order->get_meta('_weo_dispute_outcome');
+      if ($outcome === 'refund') {
+        $order->update_status('refunded', 'Escrow erstattet. TXID: '.$tx['txid']);
+      } else {
+        $order->update_status('completed', 'Escrow ausgezahlt. TXID: '.$tx['txid']);
+      }
+      $order->delete_meta_data('_weo_dispute');
+      $order->delete_meta_data('_weo_dispute_outcome');
+      $order->save();
     }
 
     wp_safe_redirect(wp_get_referer()); exit;
@@ -424,6 +485,8 @@ class WEO_Order {
     if (!$vendor_id) { $this->fallback_vendor_payout_address($order_id); $vendor_id = $order->get_meta('_weo_vendor_id'); }
     $cur = get_current_user_id();
     if ($cur !== $buyer_id && $cur !== $vendor_id) wp_die('Nicht erlaubt.');
+
+    $note = sanitize_textarea_field($_POST['weo_dispute_note'] ?? '');
 
     $all_partials = array_merge(
       (array)$order->get_meta('_weo_psbt_partials_buyer'),
@@ -461,6 +524,12 @@ class WEO_Order {
     }
 
     $order->update_status('on-hold', 'Dispute eröffnet');
+    $order->update_meta_data('_weo_dispute', current_time('mysql'));
+    if ($note) $order->update_meta_data('_weo_dispute_note', $note);
+    $order->save();
+
+    do_action('weo_dispute_opened', $order);
+
     wp_safe_redirect(wp_get_referer()); exit;
   }
 
