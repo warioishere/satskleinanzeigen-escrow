@@ -214,6 +214,8 @@ class WEO_Admin {
         $order->delete_meta_data('_weo_psbt_partials_seller');
         $order->update_meta_data('_weo_psbt_sign_count', 0);
         $order->save();
+        do_action('weo_rbf_requested', $order_id);
+        $order->add_order_note(__('RBF angefordert; Verkäufer benachrichtigt.', 'weo'));
         $psbt_b64 = esc_textarea($resp['psbt']);
         echo '<div class="notice notice-success"><p><strong>RBF-PSBT (Base64):</strong></p><textarea rows="6" style="width:100%;">'.$psbt_b64.'</textarea></div>';
       } else {

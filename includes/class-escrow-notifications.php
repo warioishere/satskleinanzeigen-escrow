@@ -7,6 +7,7 @@ class WEO_Notifications {
     add_action('weo_order_received', [__CLASS__, 'notify_received']);
     add_action('weo_psbt_uploaded', [__CLASS__, 'notify_psbt_uploaded'], 10, 2);
     add_action('weo_tx_broadcasted', [__CLASS__, 'notify_tx_broadcasted'], 10, 2);
+    add_action('weo_rbf_requested', [__CLASS__, 'notify_rbf_requested']);
   }
 
   protected static function send_mail($to, $subject, $message) {
@@ -65,5 +66,16 @@ class WEO_Notifications {
     self::send_mail($buyer, $subject, $message);
     self::send_mail($vendor_mail, $subject, $message);
     $order->add_order_note(sprintf(__('Auszahlung gesendet. TXID: %s', 'weo'), $txid), true);
+  }
+
+  public static function notify_rbf_requested($order_id) {
+    $order = wc_get_order($order_id); if (!$order) return;
+    $vendor_id = $order->get_meta('_weo_vendor_id');
+    $vendor = get_userdata($vendor_id); if (!$vendor) return;
+    $to = $vendor->user_email;
+    $subject = __('Gebührenerhöhung angefordert', 'weo');
+    $message = sprintf(__('Für Bestellung %s wurde eine RBF-PSBT angefordert. Bitte signiere die neue PSBT im Dashboard.', 'weo'), $order->get_order_number());
+    self::send_mail($to, $subject, $message);
+    $order->add_order_note(__('RBF angefordert; Verkäufer benachrichtigt.', 'weo'), true);
   }
 }
