@@ -1,10 +1,12 @@
+from typing import Dict
+
 from fastapi import APIRouter, Depends, HTTPException, Response
 from fastapi.responses import PlainTextResponse
 from prometheus_client import generate_latest, CONTENT_TYPE_LATEST
 
 import db
 from ..rpc import rpc
-from ..models import BroadcastReq, BumpFeeReq
+from ..models import BroadcastReq, BumpFeeReq, PSBTRes
 from ..config import require_api_key
 from ..metrics import WEBHOOK_QUEUE_SIZE, BROADCAST_FAIL
 from ..logging import order_id_var, log
@@ -72,13 +74,19 @@ def tx_broadcast(body: BroadcastReq):
     return {"txid": txid}
 
 
-@router.post("/tx/bumpfee", dependencies=[Depends(require_api_key)])
+@router.post("/tx/bumpfee", response_model=PSBTRes, dependencies=[Depends(require_api_key)])
 def tx_bumpfee(body: BumpFeeReq):
     order_id_var.set(body.order_id)
     meta = db.get_order(body.order_id)
     if not meta or not meta.get("payout_txid"):
         raise HTTPException(404, "txid not found")
-    res = rpc("bumpfee", [meta["payout_txid"], {"confTarget": body.target_conf}])
-    new_txid = res.get("txid") if isinstance(res, dict) else res
-    db.set_payout_txid(body.order_id, new_txid)
-    return {"txid": new_txid}
+    res = rpc("bumpfee", [meta["payout_txid"], {"confTarget": body.target_conf, "psbt": True}])
+    psbt = res.get("psbt") if isinstance(res, dict) else None
+    if not psbt:
+        raise HTTPException(500, "bumpfee failed")
+    db.start_rbf(body.order_id, psbt)
+    return PSBTRes(psbt=psbt)
+
+
+
+

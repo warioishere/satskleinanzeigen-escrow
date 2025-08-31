@@ -29,11 +29,14 @@ def init_db():
             vout INTEGER,
             confirmations INTEGER,
             partials TEXT,
+            rbf_partials TEXT,
             outputs TEXT,
             output_type TEXT,
             last_webhook_ts INTEGER,
             payout_txid TEXT,
-            deadline_ts INTEGER
+            deadline_ts INTEGER,
+            rbf_psbt TEXT,
+            rbf_state TEXT
         )
         """,
     )
@@ -50,6 +53,12 @@ def init_db():
         cur.execute("ALTER TABLE orders ADD COLUMN amount_sat INTEGER")
     if "fee_est_sat" not in cols:
         cur.execute("ALTER TABLE orders ADD COLUMN fee_est_sat INTEGER")
+    if "rbf_psbt" not in cols:
+        cur.execute("ALTER TABLE orders ADD COLUMN rbf_psbt TEXT")
+    if "rbf_partials" not in cols:
+        cur.execute("ALTER TABLE orders ADD COLUMN rbf_partials TEXT")
+    if "rbf_state" not in cols:
+        cur.execute("ALTER TABLE orders ADD COLUMN rbf_state TEXT")
     conn.commit()
     conn.close()
 
@@ -98,6 +107,19 @@ def get_partials(order_id: str) -> List[str]:
     conn.close()
     if not row or not row["partials"]:
         return []
+
+
+def get_rbf_partials(order_id: str) -> List[str]:
+    conn = get_conn()
+    cur = conn.execute("SELECT rbf_partials FROM orders WHERE order_id=?", (order_id,))
+    row = cur.fetchone()
+    conn.close()
+    if not row or not row["rbf_partials"]:
+        return []
+    try:
+        return json.loads(row["rbf_partials"])
+    except Exception:
+        return []
     try:
         return json.loads(row["partials"])
     except Exception:
@@ -131,6 +153,16 @@ def save_partials(order_id: str, partials: List[str]):
     conn = get_conn()
     conn.execute(
         "UPDATE orders SET partials=? WHERE order_id=?",
+        (json.dumps(partials), order_id),
+    )
+    conn.commit()
+    conn.close()
+
+
+def save_rbf_partials(order_id: str, partials: List[str]):
+    conn = get_conn()
+    conn.execute(
+        "UPDATE orders SET rbf_partials=? WHERE order_id=?",
         (json.dumps(partials), order_id),
     )
     conn.commit()
@@ -185,6 +217,40 @@ def set_payout_txid(order_id: str, txid: str):
     conn.execute(
         "UPDATE orders SET payout_txid=? WHERE order_id=?",
         (txid, order_id),
+    )
+    conn.commit()
+    conn.close()
+
+
+def start_rbf(order_id: str, psbt: str):
+    conn = get_conn()
+    cur = conn.execute("SELECT state FROM orders WHERE order_id=?", (order_id,))
+    row = cur.fetchone()
+    prev_state = row["state"] if row else None
+    conn.execute(
+        "UPDATE orders SET rbf_psbt=?, rbf_partials=NULL, partials=NULL, rbf_state=?, state='rbf_signing' WHERE order_id=?",
+        (psbt, prev_state, order_id),
+    )
+    conn.commit()
+    conn.close()
+
+
+def get_rbf_psbt(order_id: str) -> Optional[str]:
+    conn = get_conn()
+    cur = conn.execute("SELECT rbf_psbt FROM orders WHERE order_id=?", (order_id,))
+    row = cur.fetchone()
+    conn.close()
+    return row["rbf_psbt"] if row and row["rbf_psbt"] else None
+
+
+def clear_rbf(order_id: str):
+    conn = get_conn()
+    cur = conn.execute("SELECT rbf_state FROM orders WHERE order_id=?", (order_id,))
+    row = cur.fetchone()
+    next_state = row["rbf_state"] if row else None
+    conn.execute(
+        "UPDATE orders SET rbf_psbt=NULL, rbf_partials=NULL, rbf_state=NULL, state=? WHERE order_id=?",
+        (next_state, order_id),
     )
     conn.commit()
     conn.close()

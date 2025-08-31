@@ -208,10 +208,16 @@ class WEO_Admin {
         'order_id'    => (string)$order->get_order_number(),
         'target_conf' => $target
       ]);
-      if (!is_wp_error($resp) && !empty($resp['txid'])) {
-        $order->update_meta_data('_weo_payout_txid', $resp['txid']);
+      if (!is_wp_error($resp) && !empty($resp['psbt'])) {
+        $order->update_meta_data('_weo_rbf_psbt', $resp['psbt']);
+        $order->delete_meta_data('_weo_psbt_partials_buyer');
+        $order->delete_meta_data('_weo_psbt_partials_seller');
+        $order->update_meta_data('_weo_psbt_sign_count', 0);
         $order->save();
-        echo '<div class="notice notice-success"><p>Gebühr erhöht. Neue TXID: '.esc_html($resp['txid']).'</p></div>';
+        do_action('weo_rbf_requested', $order_id);
+        $order->add_order_note(__('RBF angefordert; Verkäufer benachrichtigt.', 'weo'));
+        $psbt_b64 = esc_textarea($resp['psbt']);
+        echo '<div class="notice notice-success"><p><strong>RBF-PSBT (Base64):</strong></p><textarea rows="6" style="width:100%;">'.$psbt_b64.'</textarea></div>';
       } else {
         echo '<div class="notice notice-error"><p>Fee-Bump fehlgeschlagen.</p></div>';
       }
