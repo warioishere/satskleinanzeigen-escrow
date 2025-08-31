@@ -53,6 +53,8 @@ The API exposes metrics under `/metrics` in the Prometheus exposition format. Th
 - `rpc_duration_seconds` – histogram of Bitcoin Core RPC latency, labelled by `method`
 - `webhook_total` – counter for webhook deliveries with label `status` (`success` or `error`)
 - `pending_signatures` – gauge for the number of missing PSBT signatures across orders
+- `broadcast_fail_total` – counter for failed transaction broadcasts
+- `stuck_orders_total` – counter labelled by `state` for orders that exceed `STUCK_ORDER_HOURS`
 
 Example scrape configuration:
 
@@ -62,3 +64,22 @@ scrape_configs:
     static_configs:
       - targets: ['api.example.com:8080']
 ```
+
+### Alerting
+
+The API periodically checks orders in `awaiting_deposit` and `signing`. When an order remains
+in one of these states longer than `STUCK_ORDER_HOURS` (default 24 h), the `stuck_orders_total{state}`
+counter is incremented and a warning is logged. Configure `STUCK_CHECK_INTERVAL` (seconds) to tune the
+scan frequency. Optionally set `SENTRY_DSN` to forward warnings to Sentry.
+
+Alertmanager should fire when either `broadcast_fail_total` or `stuck_orders_total` increases. A simple rule:
+
+```yaml
+alerts:
+  - alert: EscrowBroadcastFailures
+    expr: increase(broadcast_fail_total[5m]) > 0
+  - alert: EscrowStuckOrders
+    expr: increase(stuck_orders_total[1h]) > 0
+``` 
+
+These alerts signal that transactions failed to broadcast or orders have stalled and require manual intervention.

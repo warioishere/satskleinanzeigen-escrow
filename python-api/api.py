@@ -13,6 +13,11 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from prometheus_client import Histogram, Counter, Gauge, generate_latest, CONTENT_TYPE_LATEST
 import db
 
+try:
+    import sentry_sdk
+except Exception:
+    sentry_sdk = None
+
 load_dotenv()
 
 BTC_CORE_URL     = os.getenv("BTC_CORE_URL", "http://127.0.0.1:8332/")
@@ -31,6 +36,11 @@ WOO_CALLBACK_URL = os.getenv("WOO_CALLBACK_URL", "")
 WOO_HMAC_SECRET  = os.getenv("WOO_HMAC_SECRET", "")
 WEBHOOK_RETRIES  = int(os.getenv("WEBHOOK_RETRIES", "3"))
 WEBHOOK_BACKOFF  = float(os.getenv("WEBHOOK_BACKOFF", "2"))
+STUCK_ORDER_HOURS = int(os.getenv("STUCK_ORDER_HOURS", "24"))
+STUCK_CHECK_INTERVAL = int(os.getenv("STUCK_CHECK_INTERVAL", "600"))
+SENTRY_DSN = os.getenv("SENTRY_DSN")
+if SENTRY_DSN and sentry_sdk:
+    sentry_sdk.init(dsn=SENTRY_DSN)
 
 db.init_db()
 
@@ -38,6 +48,8 @@ db.init_db()
 RPC_HIST = Histogram('rpc_duration_seconds', 'Bitcoin Core RPC duration', ['method'])
 WEBHOOK_COUNTER = Counter('webhook_total', 'Webhook deliveries', ['status'])
 PENDING_SIG = Gauge('pending_signatures', 'Open PSBT signatures')
+STUCK_COUNTER = Counter('stuck_orders_total', 'Orders stuck beyond threshold', ['state'])
+BROADCAST_FAIL = Counter('broadcast_fail_total', 'Failed transaction broadcasts')
 
 
 def update_pending_gauge():
@@ -126,6 +138,7 @@ app.add_middleware(LoggingMiddleware)
 def _startup_worker():
     if WOO_CALLBACK_URL and WOO_HMAC_SECRET:
         threading.Thread(target=_webhook_worker, daemon=True).start()
+    threading.Thread(target=_stuck_worker, daemon=True).start()
 
 # ---- Simple API-Key dependency (optional) ----
 def require_api_key(x_api_key: Optional[str] = Header(None)):
@@ -279,6 +292,26 @@ def woo_callback(payload: Dict[str, Any]):
     if not (WOO_CALLBACK_URL and WOO_HMAC_SECRET):
         return
     _webhook_q.put(payload)
+
+
+def _stuck_worker():
+    while True:
+        try:
+            now = int(time.time())
+            orders = db.list_orders_by_states(["awaiting_deposit", "signing"])
+            for o in orders:
+                age_h = (now - (o.get("created_at") or now)) / 3600
+                if age_h > STUCK_ORDER_HOURS:
+                    state = o.get("state") or "unknown"
+                    STUCK_COUNTER.labels(state=state).inc()
+                    log.warning("order_stuck", order_id=o.get("order_id"), state=state, age_hours=age_h)
+                    if sentry_sdk:
+                        sentry_sdk.capture_message(
+                            f"order {o.get('order_id')} stuck in {state} for {age_h:.1f}h"
+                        )
+        except Exception as e:
+            log.error("stuck_worker_error", error=str(e))
+        time.sleep(STUCK_CHECK_INTERVAL)
 
 
 # ---- Helpers ----
@@ -465,7 +498,16 @@ def psbt_finalize(body: FinalizeReq):
 def tx_broadcast(body: BroadcastReq):
     if body.order_id:
         order_id_var.set(body.order_id)
-    txid = rpc("sendrawtransaction", [body.hex])
+    try:
+        txid = rpc("sendrawtransaction", [body.hex])
+    except HTTPException as e:
+        BROADCAST_FAIL.inc()
+        log.error("broadcast_fail", error=e.detail, order_id=body.order_id)
+        if sentry_sdk:
+            sentry_sdk.capture_message(
+                f"broadcast failed for order {body.order_id or 'n/a'}: {e.detail}"
+            )
+        raise
     if body.order_id:
         meta = db.get_order(body.order_id)
         if meta:

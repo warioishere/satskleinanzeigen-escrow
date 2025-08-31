@@ -151,3 +151,15 @@ def count_pending_signatures() -> int:
             pending += 2 - len(parts)
     return pending
 
+
+def list_orders_by_states(states: List[str]) -> List[Dict[str, Any]]:
+    conn = get_conn()
+    qmarks = ",".join(["?"] * len(states))
+    cur = conn.execute(
+        f"SELECT * FROM orders WHERE state IN ({qmarks})",
+        states,
+    )
+    rows = cur.fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
