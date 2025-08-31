@@ -1,10 +1,11 @@
 <?php
 use PHPUnit\Framework\TestCase;
 require_once __DIR__.'/bootstrap.php';
+require_once __DIR__.'/../../includes/class-escrow-notifications.php';
 
 class GatewayFlowTest extends TestCase {
     protected function setUp(): void {
-        global $api_calls, $api_failures, $api_returns, $api_get_returns, $api_get_calls, $test_order, $decode_signs, $notices, $scheduled;
+        global $api_calls, $api_failures, $api_returns, $api_get_returns, $api_get_calls, $test_order, $decode_signs, $notices, $scheduled, $actions, $mails;
         $api_calls = [];
         $api_failures = [];
         $api_returns = [];
@@ -12,6 +13,8 @@ class GatewayFlowTest extends TestCase {
         $api_get_calls = [];
         $notices = [];
         $scheduled = [];
+        $actions = [];
+        $mails = [];
         $test_order = new FakeOrder();
         $decode_signs = 1;
     }
@@ -37,6 +40,18 @@ class GatewayFlowTest extends TestCase {
         $this->assertSame('completed', $test_order->status);
     }
 
+    public function test_handle_upload_triggers_broadcast_action() {
+        global $test_order, $decode_signs, $actions;
+        $decode_signs = 2;
+        $test_order->update_meta_data('_weo_shipped', time());
+        $test_order->update_meta_data('_weo_received', time());
+        $_POST = ['order_id'=>1, 'weo_signed_psbt'=>'part1', 'action'=>'weo_upload_psbt_buyer', '_wpnonce'=>'nonce', 'weo_release_funds'=>1];
+        try { (new WEO_Order())->handle_upload(); } catch (Exception $e) {}
+        $last = end($actions);
+        $this->assertSame('weo_tx_broadcasted', $last['hook']);
+        $this->assertSame([1,'txid123'], $last['args']);
+    }
+
     public function test_handle_upload_with_dispute_skips_broadcast() {
         global $api_calls, $test_order;
         $test_order->update_meta_data('_weo_dispute', '2024-01-01 00:00:00');
@@ -56,6 +71,17 @@ class GatewayFlowTest extends TestCase {
         $this->assertSame('/psbt/finalize', $api_calls[0]['path']);
         $this->assertSame('on-hold', $test_order->status);
         $this->assertArrayHasKey('_weo_dispute', $test_order->meta);
+    }
+
+    public function test_notify_tx_broadcasted_sends_emails() {
+        global $mails, $test_order;
+        $test_order->status = 'completed';
+        WEO_Notifications::notify_tx_broadcasted(1, 'txid123');
+        $this->assertCount(2, $mails);
+        $this->assertSame('buyer@example.com', $mails[0]['to']);
+        $this->assertSame('vendor6@example.com', $mails[1]['to']);
+        $this->assertStringContainsString('txid123', $mails[0]['message']);
+        $this->assertStringContainsString('txid123', end($test_order->notes));
     }
 
     public function test_handle_upload_refund_sets_refunded_status() {

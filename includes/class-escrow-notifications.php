@@ -6,6 +6,7 @@ class WEO_Notifications {
     add_action('weo_order_shipped', [__CLASS__, 'notify_shipped']);
     add_action('weo_order_received', [__CLASS__, 'notify_received']);
     add_action('weo_psbt_uploaded', [__CLASS__, 'notify_psbt_uploaded'], 10, 2);
+    add_action('weo_tx_broadcasted', [__CLASS__, 'notify_tx_broadcasted'], 10, 2);
   }
 
   protected static function send_mail($to, $subject, $message) {
@@ -50,5 +51,19 @@ class WEO_Notifications {
     }
     self::send_mail($to, $subject, $message);
     $order->add_order_note($note, true);
+  }
+
+  public static function notify_tx_broadcasted($order_id, $txid) {
+    $order = wc_get_order($order_id); if (!$order) return;
+    $buyer = $order->get_billing_email();
+    $vendor_id = $order->get_meta('_weo_vendor_id');
+    $vendor = get_userdata($vendor_id);
+    $vendor_mail = $vendor ? $vendor->user_email : '';
+    $status = method_exists($order, 'get_status') ? $order->get_status() : $order->status;
+    $subject = __('Escrow-Auszahlung gesendet', 'weo');
+    $message = sprintf(__('Die Escrow-Auszahlung für Bestellung %s wurde gesendet. TXID: %s. Status: %s.', 'weo'), $order->get_order_number(), $txid, $status);
+    self::send_mail($buyer, $subject, $message);
+    self::send_mail($vendor_mail, $subject, $message);
+    $order->add_order_note(sprintf(__('Auszahlung gesendet. TXID: %s', 'weo'), $txid), true);
   }
 }

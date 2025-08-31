@@ -5,7 +5,7 @@ require_once __DIR__ . '/../../includes/class-escrow-order.php';
 
 // Basic hooks
 function add_action($hook,$cb,$prio=10){}
-function do_action($hook,...$args){}
+function do_action($hook,...$args){ global $actions; $actions[]=['hook'=>$hook,'args'=>$args]; }
 function apply_filters($hook,$value){return $value;}
 
 // WordPress sanitizers / escaping
@@ -65,6 +65,8 @@ function current_time($t){return time();}
 function wp_next_scheduled($h,$a=[]){return false;}
 function wp_schedule_single_event($ts,$h,$a=[]){ global $scheduled; $scheduled[]=['ts'=>$ts,'hook'=>$h,'args'=>$a]; }
 function dokan_get_navigation_url($p){ return '/'.$p; }
+function wc_mail($to,$subject,$message){ global $mails; $mails[]=['to'=>$to,'subject'=>$subject,'message'=>$message]; }
+function get_userdata($id){ return (object)['user_email'=>'vendor'.$id.'@example.com']; }
 
 // Minimal WooCommerce replacements
 class WEO_Vendor{ public static function get_vendor_xpub_by_order($order_id){ return 'XSELLER'; } }
@@ -81,6 +83,7 @@ class FakeOrder{
   public function save(){}
   public function get_total(){return 1;}
   public function get_order_number(){return 'order1';}
+  public function get_billing_email(){return 'buyer@example.com';}
   public function update_status($s,$n){$this->status=$s; $this->notes[]=$n;}
   public function add_order_note($n){$this->notes[]=$n;}
 }

@@ -495,6 +495,7 @@ class WEO_Order {
       $order->delete_meta_data('_weo_dispute');
       $order->delete_meta_data('_weo_dispute_outcome');
       $order->save();
+      do_action('weo_tx_broadcasted', $order_id, $tx['txid']);
     } else {
       wc_add_notice('Broadcast fehlgeschlagen. Bitte Support kontaktieren.', 'error');
     }
