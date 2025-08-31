@@ -21,8 +21,8 @@ if (!defined('ABSPATH')) exit;
       <p><?php esc_html_e('Versand','weo'); ?>: <?php echo $o['shipped'] ? esc_html(date_i18n(get_option('date_format'), $o['shipped'])) : esc_html__('noch nicht bestätigt','weo'); ?></p>
       <p><?php esc_html_e('Empfang','weo'); ?>: <?php echo $o['received'] ? esc_html(date_i18n(get_option('date_format'), $o['received'])) : esc_html__('noch nicht bestätigt','weo'); ?></p>
 
-      <?php $cur = get_current_user_id(); $ship_nonce = wp_create_nonce('weo_ship_'.$o['id']); ?>
-      <?php if ($cur && $cur == $o['vendor_id'] && empty($o['shipped'])) : ?>
+      <?php $ship_nonce = wp_create_nonce('weo_ship_'.$o['id']); ?>
+      <?php if ($o['role'] === 'vendor' && empty($o['shipped'])) : ?>
         <form method="post" class="dokan-form" style="margin-top:10px;">
           <input type="hidden" name="order_id" value="<?php echo intval($o['id']); ?>">
           <input type="hidden" name="weo_nonce" value="<?php echo esc_attr($ship_nonce); ?>">
@@ -30,7 +30,7 @@ if (!defined('ABSPATH')) exit;
           <button type="submit" class="dokan-btn"><?php esc_html_e('Als versendet markieren','weo'); ?></button>
         </form>
       <?php endif; ?>
-      <?php if ($cur && $cur == $o['buyer_id'] && $o['shipped'] && empty($o['received'])) : ?>
+      <?php if ($o['role'] === 'buyer' && $o['shipped'] && empty($o['received'])) : ?>
         <form method="post" class="dokan-form" style="margin-top:10px;">
           <input type="hidden" name="order_id" value="<?php echo intval($o['id']); ?>">
           <input type="hidden" name="weo_nonce" value="<?php echo esc_attr($ship_nonce); ?>">
@@ -39,7 +39,7 @@ if (!defined('ABSPATH')) exit;
         </form>
       <?php endif; ?>
 
-      <?php if (in_array($o['state'], ['escrow_funded','signing','dispute'])) : ?>
+      <?php if ($o['role'] === 'vendor' && in_array($o['state'], ['escrow_funded','signing','dispute'])) : ?>
         <?php $nonce = wp_create_nonce('weo_psbt_'.$o['id']); ?>
         <?php if ($o['state'] !== 'dispute') : ?>
         <form method="post" class="dokan-form" style="margin-top:10px;">
@@ -56,6 +56,8 @@ if (!defined('ABSPATH')) exit;
           <button type="submit" class="dokan-btn"><?php esc_html_e('PSBT (Erstattung an Käufer) erstellen','weo'); ?></button>
         </form>
       <?php endif; ?>
+
+      <?php if ($o['role'] === 'vendor') : ?>
       <form method="post" action="<?php echo esc_url(admin_url('admin-post.php')); ?>" class="dokan-form" style="margin-top:10px;">
         <input type="hidden" name="action" value="weo_upload_psbt_seller">
         <input type="hidden" name="order_id" value="<?php echo intval($o['id']); ?>">
@@ -67,6 +69,19 @@ if (!defined('ABSPATH')) exit;
           <button type="submit" class="dokan-btn dokan-btn-theme"><?php esc_html_e('PSBT hochladen','weo'); ?></button>
         </div>
       </form>
+      <?php else : ?>
+      <form method="post" action="<?php echo esc_url(admin_url('admin-post.php')); ?>" class="dokan-form" style="margin-top:10px;">
+        <input type="hidden" name="action" value="weo_upload_psbt_buyer">
+        <input type="hidden" name="order_id" value="<?php echo intval($o['id']); ?>">
+        <div class="dokan-form-group">
+          <label class="dokan-form-label" for="weo_signed_psbt_<?php echo intval($o['id']); ?>"><?php esc_html_e('Signierte PSBT (Base64)','weo'); ?></label>
+          <textarea name="weo_signed_psbt" id="weo_signed_psbt_<?php echo intval($o['id']); ?>" rows="6" style="width:100%" placeholder="PSBT..."></textarea>
+        </div>
+        <div class="dokan-form-group">
+          <button type="submit" class="dokan-btn dokan-btn-theme"><?php esc_html_e('PSBT hochladen','weo'); ?></button>
+        </div>
+      </form>
+      <?php endif; ?>
     </div>
   <?php endforeach; ?>
   <script>
