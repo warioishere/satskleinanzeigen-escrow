@@ -137,7 +137,7 @@ class WEO_Admin {
     ]);
 
     echo '<table class="widefat fixed"><thead><tr>';
-    echo '<th>Bestellung</th><th>Käufer</th><th>Verkäufer</th><th>Funding</th><th>Aktionen</th>';
+    echo '<th>Bestellung</th><th>Käufer</th><th>Verkäufer</th><th>Funding</th><th>Nachricht</th><th>Aktionen</th>';
     echo '</tr></thead><tbody>';
 
     foreach ($orders as $order) {
@@ -158,7 +158,9 @@ class WEO_Admin {
       echo '<td><a href="'.esc_url(get_edit_post_link($order->get_id())).'">#'.esc_html($order->get_order_number()).'</a></td>';
       echo '<td>'.esc_html($buyer_id).'</td>';
       echo '<td>'.esc_html($vendor_id).'</td>';
+      $note = trim($order->get_meta('_weo_dispute_note'));
       echo '<td>'.esc_html($conf.'/'.$fund).'</td>';
+      echo '<td>'.esc_html($note).'</td>';
       echo '<td>';
       echo '<form method="post" style="display:inline;margin-right:4px;">';
       echo '<input type="hidden" name="order_id" value="'.intval($order->get_id()).'">';

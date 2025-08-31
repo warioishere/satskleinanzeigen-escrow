@@ -43,6 +43,20 @@ if (!defined('ABSPATH')) exit;
         </form>
       <?php endif; ?>
 
+      <?php if (in_array($o['state'], ['escrow_funded','signing'])) : ?>
+        <form method="post" action="<?php echo esc_url(admin_url('admin-post.php')); ?>" class="dokan-form weo-open-dispute" style="margin-top:10px;">
+          <input type="hidden" name="action" value="weo_open_dispute">
+          <input type="hidden" name="order_id" value="<?php echo intval($o['id']); ?>">
+          <div class="dokan-form-group">
+            <label class="dokan-form-label" for="weo_dispute_note_<?php echo intval($o['id']); ?>"><?php esc_html_e('Problem beschreiben','weo'); ?></label>
+            <textarea name="weo_dispute_note" id="weo_dispute_note_<?php echo intval($o['id']); ?>" rows="4" style="width:100%"></textarea>
+          </div>
+          <div class="dokan-form-group">
+            <button type="submit" class="dokan-btn"><?php esc_html_e('Dispute eröffnen','weo'); ?></button>
+          </div>
+        </form>
+      <?php endif; ?>
+
       <?php if ($o['role'] === 'vendor' && in_array($o['state'], ['escrow_funded','signing','dispute'])) : ?>
         <?php $nonce = wp_create_nonce('weo_psbt_'.$o['id']); ?>
         <?php if ($o['state'] !== 'dispute') : ?>
@@ -86,9 +100,17 @@ if (!defined('ABSPATH')) exit;
   <?php endforeach; ?>
   <script>
   (function(){
-    if (!window.QRCode) return;
-    document.querySelectorAll('.weo-qr[data-addr]').forEach(function(el){
-      new QRCode(el, el.getAttribute('data-addr'));
+    if (window.QRCode) {
+      document.querySelectorAll('.weo-qr[data-addr]').forEach(function(el){
+        new QRCode(el, el.getAttribute('data-addr'));
+      });
+    }
+    document.querySelectorAll('form.weo-open-dispute').forEach(function(f){
+      f.addEventListener('submit', function(e){
+        if (!confirm('<?php echo esc_js(__('Disput wirklich eröffnen? Die Bestellung wird in den Disput-Status versetzt und nur der Admin entscheidet über die Auszahlung.', 'weo')); ?>')) {
+          e.preventDefault();
+        }
+      });
     });
   })();
   </script>

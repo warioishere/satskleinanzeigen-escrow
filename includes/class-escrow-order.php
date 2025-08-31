@@ -173,10 +173,13 @@ class WEO_Order {
 
     if (in_array($state, ['escrow_funded','signing'])) {
       $upload_url = esc_url(admin_url('admin-post.php'));
-      echo '<form method="post" action="'.$upload_url.'" style="margin-top:10px;">';
+      $confirm = esc_js(__('Disput wirklich eröffnen? Die Bestellung wird in den Disput-Status versetzt und nur der Admin entscheidet über die Auszahlung.', 'weo'));
+      echo '<form method="post" action="'.$upload_url.'" style="margin-top:10px;" onsubmit="return confirm(\''.$confirm.'\');">';
       echo '<input type="hidden" name="action" value="weo_open_dispute">';
       echo '<input type="hidden" name="order_id" value="'.intval($order_id).'">';
-      echo '<p><button class="button">Dispute eröffnen</button></p>';
+      echo '<p><label for="weo_dispute_note_'.intval($order_id).'">'.esc_html__('Problem beschreiben','weo').'</label><br/>';
+      echo '<textarea name="weo_dispute_note" id="weo_dispute_note_'.intval($order_id).'" rows="4" style="width:100%"></textarea></p>';
+      echo '<p><button class="button">'.esc_html__('Dispute eröffnen','weo').'</button></p>';
       echo '</form>';
     }
 
@@ -483,6 +486,8 @@ class WEO_Order {
     $cur = get_current_user_id();
     if ($cur !== $buyer_id && $cur !== $vendor_id) wp_die('Nicht erlaubt.');
 
+    $note = sanitize_textarea_field($_POST['weo_dispute_note'] ?? '');
+
     $all_partials = array_merge(
       (array)$order->get_meta('_weo_psbt_partials_buyer'),
       (array)$order->get_meta('_weo_psbt_partials_seller')
@@ -520,6 +525,7 @@ class WEO_Order {
 
     $order->update_status('on-hold', 'Dispute eröffnet');
     $order->update_meta_data('_weo_dispute', current_time('mysql'));
+    if ($note) $order->update_meta_data('_weo_dispute_note', $note);
     $order->save();
 
     do_action('weo_dispute_opened', $order);
