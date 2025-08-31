@@ -17,7 +17,7 @@ require_once WEO_DIR.'includes/helpers.php';
 require_once WEO_DIR.'includes/class-escrow-settings.php';
 require_once WEO_DIR.'includes/class-escrow-vendor.php';
 require_once WEO_DIR.'includes/class-escrow-dokan.php';
-require_once WEO_DIR.'includes/class-escrow-checkout.php';
+require_once WEO_DIR.'includes/class-escrow-gateway.php';
 require_once WEO_DIR.'includes/class-escrow-order.php';
 require_once WEO_DIR.'includes/class-escrow-rest.php';
 require_once WEO_DIR.'includes/class-escrow-admin.php';
@@ -27,8 +27,12 @@ add_action('plugins_loaded', function() {
   new WEO_Settings();
   new WEO_Vendor();
   if (function_exists('dokan')) new WEO_Dokan();
-  new WEO_Checkout();
   new WEO_Order();
   new WEO_REST();
   if (is_admin()) new WEO_Admin();
+});
+
+add_filter('woocommerce_payment_gateways', function($methods) {
+  $methods[] = 'WEO_Gateway';
+  return $methods;
 });
