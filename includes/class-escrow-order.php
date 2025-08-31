@@ -113,6 +113,7 @@ class WEO_Order {
     echo '<li>'.esc_html__('Verkäufer markiert Versand, Käufer bestätigt den Empfang.', 'weo').'</li>';
     echo '<li>'.esc_html__('Beide Parteien erstellen eine PSBT, signieren sie und laden sie hoch.', 'weo').'</li>';
     echo '</ol>';
+    echo '<p>'.esc_html__('Die PSBT kann jederzeit im Dokan-Dashboard unter "Treuhand Service" erneut abgerufen und signiert werden.', 'weo').'</p>';
     $doc_url = esc_url(plugins_url('docs/woo-user-guide.md', WEO_PLUGIN_FILE));
     echo '<p><a href="'.$doc_url.'" target="_blank" rel="noopener">'.esc_html__('Zur ausführlichen Anleitung', 'weo').'</a></p>';
 
