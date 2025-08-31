@@ -80,7 +80,7 @@ def stub_rpc(method, params=None):
         else:
             return {'inputs':[{'partial_signatures':{'a':'s'}}], 'tx':{'vout':[{'value':0.00055,'scriptPubKey':{'addresses':['tb1qseller111']}}]}}
     if method == 'analyzepsbt':
-        return {'fee':0.00005}
+        return {'fee':0.000065}
     if method == 'combinepsbt':
         return 'merged'
     if method == 'gettransaction':
@@ -99,7 +99,10 @@ def stub_rpc(method, params=None):
 
 
 def stub_utxos(label, min_conf):
-    return [{'txid':'tx1','vout':0,'amount':0.0006}]
+    return [{'txid':'tx1','vout':0,'amount':0.000615}]
+
+def stub_utxos_short(label, min_conf):
+    return [{'txid': 'tx1', 'vout': 0, 'amount': 0.0006}]
 
 
 def test_payout_quote(monkeypatch):
@@ -117,7 +120,7 @@ def test_payout_quote(monkeypatch):
     assert status['fee_est_sat']==1500
     r=client.post('/orders/orderQ/payout_quote', json={'address':'tb1qseller111'}, headers=headers)
     assert r.status_code==200, r.text
-    assert r.json()=={'payout_sat':55000,'fee_sat':5000}
+    assert r.json()=={'payout_sat':55000,'fee_sat':6500}
 
 def test_full_payout_flow(monkeypatch):
     client=create_client(monkeypatch)
@@ -143,7 +146,7 @@ def test_full_payout_flow(monkeypatch):
     dec=r.json()
     assert dec['sign_count']==2
     assert dec['outputs']['tb1qseller111']==55000
-    assert dec['fee_sat']==5000
+    assert dec['fee_sat']==6500
     r=client.post('/psbt/finalize', json={'order_id':'order1','psbt':'merged','state':'completed'}, headers=headers)
     assert r.status_code==200, r.text
     assert r.json()['hex']=='deadbeef'
@@ -171,6 +174,22 @@ def test_refund_psbt(monkeypatch):
     r=client.post('/psbt/build_refund', json={'order_id':'order2','address':'tb1qrefunded0'}, headers=headers)
     assert r.status_code==200, r.text
     assert r.json()['psbt']=='psbtR'
+
+
+def test_underfunded_deposit(monkeypatch):
+    client = create_client(monkeypatch)
+    import api
+    monkeypatch.setattr(api, 'rpc', stub_rpc)
+    monkeypatch.setattr(api, 'find_utxos_for_label', stub_utxos_short)
+    headers = {'x-api-key': 'testkey'}
+    body = {'order_id': 'orderU', 'buyer': {'xpub': 'X'}, 'seller': {'xpub': 'Y'}, 'escrow': {'xpub': 'Z'}, 'min_conf': 2, 'amount_sat': 60000}
+    r = client.post('/orders', json=body, headers=headers)
+    assert r.status_code == 200
+    r = client.get('/orders/orderU/status', headers=headers)
+    st = r.json()
+    assert st['state'] == 'awaiting_deposit'
+    assert st['funding']['total_sat'] == 60000
+    assert st['funding']['shortfall_sat'] == 1500
 
 
 def test_psbt_decode_multi_input(monkeypatch):

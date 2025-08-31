@@ -528,28 +528,40 @@ def order_status(order_id: str):
     db.update_funding(order_id, first["txid"], first["vout"], min_conf or 0)
 
     state = meta["state"]
-    expected = int(meta.get("amount_sat") or 0)
-    if expected > 0 and min_conf is not None and min_conf >= int(meta["min_conf"]) and total_sat >= expected:
-        changed = advance_state(meta, "escrow_funded", min_conf)
-        state = "escrow_funded"
-        if changed:
-            woo_callback({
-                "order_id": order_id,
-                "event": "escrow_funded",
-                "utxos": funding_utxos,
-                "total_sat": total_sat,
-                "confs": min_conf,
-            })
+    fee_est = int(meta.get("fee_est_sat") or 0)
+    expected = int(meta.get("amount_sat") or 0) + fee_est
+    shortfall = 0
+    if expected > 0 and min_conf is not None and min_conf >= int(meta["min_conf"]):
+        tolerance = int(expected * 0.005)
+        if total_sat + tolerance >= expected:
+            changed = advance_state(meta, "escrow_funded", min_conf)
+            state = "escrow_funded"
+            if changed:
+                woo_callback({
+                    "order_id": order_id,
+                    "event": "escrow_funded",
+                    "utxos": funding_utxos,
+                    "total_sat": total_sat,
+                    "confs": min_conf,
+                })
+            if total_sat < expected:
+                shortfall = expected - total_sat
+        else:
+            shortfall = expected - total_sat
+
+    funding = {
+        "utxos": funding_utxos,
+        "total_sat": total_sat,
+        "confirmations": min_conf,
+    }
+    if shortfall > 0:
+        funding["shortfall_sat"] = shortfall
 
     res = StatusRes(
-        funding={
-            "utxos": funding_utxos,
-            "total_sat": total_sat,
-            "confirmations": min_conf,
-        },
+        funding=funding,
         state=state,
         deadline_ts=meta.get("deadline_ts"),
-        fee_est_sat=meta.get("fee_est_sat"),
+        fee_est_sat=fee_est,
     )
     return res
 
