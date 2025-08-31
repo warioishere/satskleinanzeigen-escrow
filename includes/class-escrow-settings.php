@@ -15,6 +15,7 @@ class WEO_Settings {
     add_settings_field('min_conf', 'Min. Bestätigungen', [$this,'field_conf'], 'weo', 'weo_main');
     add_settings_field('api_key', 'API Key', [$this,'field_api_key'], 'weo', 'weo_main');
     add_settings_field('hmac_secret', 'Webhook HMAC Secret', [$this,'field_hmac_secret'], 'weo', 'weo_main');
+    add_settings_field('timeout_days', 'Signatur-Timeout (Tage)', [$this,'field_timeout'], 'weo', 'weo_main');
   }
 
   public function sanitize($opts) {
@@ -24,6 +25,7 @@ class WEO_Settings {
     $clean['min_conf']   = max(0, intval($opts['min_conf'] ?? 1));
     $clean['api_key']    = sanitize_text_field($opts['api_key'] ?? '');
     $clean['hmac_secret']= sanitize_text_field($opts['hmac_secret'] ?? '');
+    $clean['timeout_days']= max(1, intval($opts['timeout_days'] ?? 7));
     return $clean;
   }
 
@@ -51,7 +53,12 @@ class WEO_Settings {
 
   public function field_hmac_secret() {
     $v = esc_attr(weo_get_option('hmac_secret',''));
-    echo "<input type='text' name='".WEO_OPT."[hmac_secret]' value='$v' class='regular-text' />";
+    echo "<input type='text' name='".WEO_OPT."[hmac_secret]' value='$v' class='regular-text' />"; 
+  }
+
+  public function field_timeout() {
+    $v = intval(weo_get_option('timeout_days',7));
+    echo "<input type='number' name='".WEO_OPT."[timeout_days]' value='$v' min='1' />"; 
   }
 
   public function render() { ?>

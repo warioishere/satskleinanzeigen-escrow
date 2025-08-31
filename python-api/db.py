@@ -28,16 +28,22 @@ def init_db():
             confirmations INTEGER,
             partials TEXT,
             outputs TEXT,
+            output_type TEXT,
             last_webhook_ts INTEGER,
-            payout_txid TEXT
+            payout_txid TEXT,
+            deadline_ts INTEGER
         )
         """,
     )
     cols = [r[1] for r in cur.execute("PRAGMA table_info(orders)")]
     if "outputs" not in cols:
         cur.execute("ALTER TABLE orders ADD COLUMN outputs TEXT")
+    if "output_type" not in cols:
+        cur.execute("ALTER TABLE orders ADD COLUMN output_type TEXT")
     if "payout_txid" not in cols:
         cur.execute("ALTER TABLE orders ADD COLUMN payout_txid TEXT")
+    if "deadline_ts" not in cols:
+        cur.execute("ALTER TABLE orders ADD COLUMN deadline_ts INTEGER")
     conn.commit()
     conn.close()
 
@@ -82,19 +88,25 @@ def get_partials(order_id: str) -> List[str]:
         return []
 
 
-def update_state(order_id: str, state: str, confirmations: Optional[int] = None):
+def update_state(
+    order_id: str,
+    state: str,
+    confirmations: Optional[int] = None,
+    deadline: Optional[int] = None,
+):
     conn = get_conn()
     now = int(time.time())
+    fields = ["state=?", "created_at=?"]
+    params: List[Any] = [state, now]
     if confirmations is not None:
-        conn.execute(
-            "UPDATE orders SET state=?, confirmations=?, created_at=? WHERE order_id=?",
-            (state, confirmations, now, order_id),
-        )
-    else:
-        conn.execute(
-            "UPDATE orders SET state=?, created_at=? WHERE order_id=?",
-            (state, now, order_id),
-        )
+        fields.append("confirmations=?")
+        params.append(confirmations)
+    if deadline is not None:
+        fields.append("deadline_ts=?")
+        params.append(deadline)
+    sql = f"UPDATE orders SET {', '.join(fields)} WHERE order_id=?"
+    params.append(order_id)
+    conn.execute(sql, params)
     conn.commit()
     conn.close()
 
@@ -109,11 +121,11 @@ def save_partials(order_id: str, partials: List[str]):
     conn.close()
 
 
-def set_outputs(order_id: str, outputs: Dict[str, int]):
+def set_outputs(order_id: str, outputs: Dict[str, int], output_type: str):
     conn = get_conn()
     conn.execute(
-        "UPDATE orders SET outputs=? WHERE order_id=?",
-        (json.dumps(outputs), order_id),
+        "UPDATE orders SET outputs=?, output_type=? WHERE order_id=?",
+        (json.dumps(outputs), output_type, order_id),
     )
     conn.commit()
     conn.close()

@@ -91,6 +91,7 @@ class WEO_Order {
     $status  = weo_api_get('/orders/'.rawurlencode($oid).'/status');
     $funding = is_wp_error($status) ? null : ($status['funding'] ?? null);
     $state   = is_wp_error($status) ? 'unknown' : ($status['state'] ?? 'unknown');
+    $deadline = is_wp_error($status) ? 0 : intval($status['deadline_ts'] ?? 0);
 
     // Stepper
     $labels = [
@@ -131,6 +132,14 @@ class WEO_Order {
       echo '<p>Noch keine Einzahlung erkannt.</p>';
     }
     echo '<p>Status: <strong>'.esc_html($state).'</strong></p>';
+    if ($deadline) {
+      if ($deadline > time()) {
+        $dl = intval($deadline);
+        echo '<p>Frist: <span id="weo_deadline" data-deadline="'.$dl.'"></span></p>';
+      } else {
+        echo '<p class="weo-expired">Frist abgelaufen</p>';
+      }
+    }
     $signs = intval($order->get_meta('_weo_psbt_sign_count'));
     echo '<p>Signaturen: '. $signs . '/2</p>';
 
@@ -221,6 +230,20 @@ class WEO_Order {
             btn.textContent = 'Kopiert!';
             setTimeout(function(){ btn.textContent = 'Adresse kopieren'; }, 1500);
           });
+        }
+        var dl = document.getElementById('weo_deadline');
+        if (dl) {
+          var end = parseInt(dl.getAttribute('data-deadline'),10)*1000;
+          function tick(){
+            var diff = Math.floor((end - Date.now())/1000);
+            if (diff <= 0){ dl.textContent = 'abgelaufen'; return; }
+            var d = Math.floor(diff/86400); diff%=86400;
+            var h = Math.floor(diff/3600); diff%=3600;
+            var m = Math.floor(diff/60);
+            dl.textContent = d+'d '+h+'h '+m+'m';
+            setTimeout(tick,60000);
+          }
+          tick();
         }
 
         var stepper = document.querySelector('.weo-stepper');

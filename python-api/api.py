@@ -38,6 +38,7 @@ WEBHOOK_RETRIES  = int(os.getenv("WEBHOOK_RETRIES", "3"))
 WEBHOOK_BACKOFF  = float(os.getenv("WEBHOOK_BACKOFF", "2"))
 STUCK_ORDER_HOURS = int(os.getenv("STUCK_ORDER_HOURS", "24"))
 STUCK_CHECK_INTERVAL = int(os.getenv("STUCK_CHECK_INTERVAL", "600"))
+SIGNING_DEADLINE_DAYS = int(os.getenv("SIGNING_DEADLINE_DAYS", "7"))
 SENTRY_DSN = os.getenv("SENTRY_DSN")
 if SENTRY_DSN and sentry_sdk:
     sentry_sdk.init(dsn=SENTRY_DSN)
@@ -196,6 +197,7 @@ class CreateOrderRes(BaseModel):
 class StatusRes(BaseModel):
     funding: Optional[Dict[str, Any]] = None
     state: str
+    deadline_ts: Optional[int] = None
 
 class PSBTBuildReq(BaseModel):
     order_id: OrderID
@@ -315,6 +317,20 @@ def _stuck_worker():
                         sentry_sdk.capture_message(
                             f"order {o.get('order_id')} stuck in {state} for {age_h:.1f}h"
                         )
+                if (o.get("state") == "signing" and o.get("deadline_ts") and now > int(o["deadline_ts"])):
+                    try:
+                        parts = db.get_partials(o["order_id"])
+                        if not parts:
+                            continue
+                        merged = rpc("combinepsbt", [parts])
+                        signed = rpc("walletprocesspsbt", [merged])
+                        signed_psbt = signed.get("psbt", merged)
+                        final_state = "completed" if o.get("output_type") != "refund" else "refunded"
+                        fin = psbt_finalize(FinalizeReq(order_id=o["order_id"], psbt=signed_psbt, state=final_state))
+                        tx_broadcast(BroadcastReq(order_id=o["order_id"], hex=fin["hex"], state=final_state))
+                        log.info("deadline_escalated", order_id=o["order_id"], state=final_state)
+                    except Exception as e:
+                        log.error("deadline_escalation_failed", order_id=o.get("order_id"), error=str(e))
         except Exception as e:
             log.error("stuck_worker_error", error=str(e))
         time.sleep(STUCK_CHECK_INTERVAL)
@@ -337,8 +353,15 @@ def advance_state(order: Dict[str, Any], new_state: str, confirmations: Optional
     allowed = STATE_TRANSITIONS.get(cur, set())
     if new_state not in allowed:
         raise HTTPException(400, f"invalid state transition {cur}->{new_state}")
-    db.update_state(order["order_id"], new_state, confirmations)
+    deadline = None
+    if new_state in {"escrow_funded", "signing"}:
+        deadline = int(time.time()) + SIGNING_DEADLINE_DAYS * 86400
+    db.update_state(order["order_id"], new_state, confirmations, deadline)
     order["state"] = new_state
+    if deadline is not None:
+        order["deadline_ts"] = deadline
+    else:
+        order["deadline_ts"] = None
     update_pending_gauge()
     return True
 
@@ -417,7 +440,7 @@ def order_status(order_id: str):
         return StatusRes(state="awaiting_deposit")
     utxos = find_utxos_for_label(meta["label"], 0)
     if not utxos:
-        return StatusRes(state=meta["state"])
+        return StatusRes(state=meta["state"], deadline_ts=meta.get("deadline_ts"))
 
     # nimm größtes UTXO (oder summe, je nach Policy)
     u = sorted(utxos, key=lambda x: x.get("amount",0), reverse=True)[0]
@@ -432,11 +455,13 @@ def order_status(order_id: str):
             woo_callback({"order_id": order_id, "event":"escrow_funded", "txid": u["txid"], "confs": confs})
     res = StatusRes(
         funding={
-            "txid": u["txid"], "vout": u["vout"],
+            "txid": u["txid"],
+            "vout": u["vout"],
             "value_sat": int(round(u["amount"] * 1e8)),
-            "confirmations": confs
+            "confirmations": confs,
         },
-        state=state
+        state=state,
+        deadline_ts=meta.get("deadline_ts"),
     )
     return res
 
@@ -453,7 +478,7 @@ def psbt_build(body: PSBTBuildReq):
     ins = [{"txid": u["txid"], "vout": u["vout"]} for u in utxos]
     outs_btc: List[Dict[str,float]] = [{addr: sats/1e8} for addr, sats in body.outputs.items()]
     psbt = rpc("createpsbt", [ins, outs_btc, 0, True])
-    db.set_outputs(body.order_id, body.outputs)
+    db.set_outputs(body.order_id, body.outputs, "payout")
     advance_state(meta, "signing")
     return PSBTRes(psbt=psbt)
 
@@ -485,7 +510,7 @@ def psbt_build_refund(body: PSBTRefundReq):
     if len(addrs) != 1 or addrs[0] != body.address:
         raise HTTPException(400, "outputs mismatch")
     val_sat = int(round(outs[0].get("value", 0) * 1e8))
-    db.set_outputs(body.order_id, {body.address: val_sat})
+    db.set_outputs(body.order_id, {body.address: val_sat}, "refund")
     advance_state(meta, "signing")
     return PSBTRes(psbt=psbt)
 

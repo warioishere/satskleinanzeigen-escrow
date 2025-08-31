@@ -83,3 +83,15 @@ alerts:
 ``` 
 
 These alerts signal that transactions failed to broadcast or orders have stalled and require manual intervention.
+
+## Signing deadlines
+
+Orders that reach `escrow_funded` or `signing` receive a signing deadline `SIGNING_DEADLINE_DAYS` (default 7 days).
+The Python API stores this as `deadline_ts` in the database and the WooCommerce plugin displays the remaining
+time in the order panel. When the deadline expires and only one party has signed, the API will automatically
+co‑sign with the escrow key and broadcast the payout or refund, depending on the stored destination.
+
+Configure the timeout period in two places:
+
+- Set the `SIGNING_DEADLINE_DAYS` environment variable for the API service.
+- In WordPress, adjust the **Signatur‑Timeout (Tage)** option under the plugin settings to match the server value.
