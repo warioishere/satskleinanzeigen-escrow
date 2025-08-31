@@ -442,23 +442,45 @@ def order_status(order_id: str):
     if not utxos:
         return StatusRes(state=meta["state"], deadline_ts=meta.get("deadline_ts"))
 
-    # nimm größtes UTXO (oder summe, je nach Policy)
-    u = sorted(utxos, key=lambda x: x.get("amount",0), reverse=True)[0]
-    tx = rpc("gettransaction", [u["txid"]])
-    confs = int(tx.get("confirmations", 0))
-    db.update_funding(order_id, u["txid"], u["vout"], confs)
-    state = meta["state"]
-    if confs >= int(meta["min_conf"]):
-        changed = advance_state(meta, "escrow_funded", confs)
-        state = "escrow_funded"
-        if changed:
-            woo_callback({"order_id": order_id, "event":"escrow_funded", "txid": u["txid"], "confs": confs})
-    res = StatusRes(
-        funding={
+    total_sat = 0
+    funding_utxos = []
+    min_conf = None
+    for u in utxos:
+        tx = rpc("gettransaction", [u["txid"]])
+        conf = int(tx.get("confirmations", 0))
+        sat = int(round(u.get("amount", 0) * 1e8))
+        total_sat += sat
+        funding_utxos.append({
             "txid": u["txid"],
             "vout": u["vout"],
-            "value_sat": int(round(u["amount"] * 1e8)),
-            "confirmations": confs,
+            "value_sat": sat,
+            "confirmations": conf,
+        })
+        if min_conf is None or conf < min_conf:
+            min_conf = conf
+
+    first = utxos[0]
+    db.update_funding(order_id, first["txid"], first["vout"], min_conf or 0)
+
+    state = meta["state"]
+    expected = int(meta.get("amount_sat") or 0)
+    if min_conf is not None and min_conf >= int(meta["min_conf"]) and total_sat >= expected:
+        changed = advance_state(meta, "escrow_funded", min_conf)
+        state = "escrow_funded"
+        if changed:
+            woo_callback({
+                "order_id": order_id,
+                "event": "escrow_funded",
+                "utxos": funding_utxos,
+                "total_sat": total_sat,
+                "confs": min_conf,
+            })
+
+    res = StatusRes(
+        funding={
+            "utxos": funding_utxos,
+            "total_sat": total_sat,
+            "confirmations": min_conf,
         },
         state=state,
         deadline_ts=meta.get("deadline_ts"),
