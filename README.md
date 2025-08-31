@@ -12,3 +12,11 @@ The WooCommerce plugin holds a single active key in its settings and sends it wi
 1. Deploy a new key and add it to `API_KEYS` on the API server.
 2. Update the plugin setting with the new key.
 3. Once clients have switched, remove the old key from `API_KEYS` or move it to `API_KEY_REVOKED`.
+
+## Webhook security
+
+When the API calls back into WooCommerce it signs the JSON body together with a Unix timestamp. The plugin stores a shared HMAC secret and verifies each request:
+
+- `x-weo-ts` contains the timestamp (±5 minutes allowed)
+- `x-weo-sign` is `HMAC_SHA256(secret, ts + body)`
+- Requests with missing, stale, or mismatched signatures are rejected with `401`

@@ -10,8 +10,20 @@ class WEO_REST {
     register_rest_route('weo/v1', '/webhook', [
       'methods'  => 'POST',
       'callback' => [$this,'handle'],
-      'permission_callback' => '__return_true', // HMAC prüfen!
+      'permission_callback' => [$this,'verify'],
     ]);
+  }
+
+  public function verify($req) {
+    $secret = weo_get_option('hmac_secret','');
+    $ts  = intval($req->get_header('x-weo-ts'));
+    $sig = $req->get_header('x-weo-sign');
+    if (!$secret || !$ts || !$sig) return new WP_Error('forbidden','missing signature',['status'=>401]);
+    if (abs(time()-$ts) > 300) return new WP_Error('forbidden','stale timestamp',['status'=>401]);
+    $body = $req->get_body();
+    $calc = hash_hmac('sha256', $ts.$body, $secret);
+    if (!hash_equals($calc, $sig)) return new WP_Error('forbidden','bad signature',['status'=>401]);
+    return true;
   }
 
   public function handle($req) {

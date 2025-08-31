@@ -1,4 +1,4 @@
-import os, json, hmac, hashlib
+import os, json, hmac, hashlib, time
 from typing import Dict, Any, List, Optional
 from fastapi import FastAPI, HTTPException, Header, Depends
 from fastapi.middleware.cors import CORSMiddleware
@@ -103,11 +103,13 @@ def woo_callback(payload: Dict[str, Any]):
     if not (WOO_CALLBACK_URL and WOO_HMAC_SECRET):
         return
     body = json.dumps(payload, separators=(",",":")).encode()
-    sig  = hmac.new(WOO_HMAC_SECRET.encode(), body, hashlib.sha256).hexdigest()
+    ts   = str(int(time.time()))
+    sig  = hmac.new(WOO_HMAC_SECRET.encode(), ts.encode() + body, hashlib.sha256).hexdigest()
     try:
         requests.post(WOO_CALLBACK_URL, data=body, headers={
             "content-type":"application/json",
-            "x-weo-sign": sig
+            "x-weo-sign": sig,
+            "x-weo-ts": ts
         }, timeout=10)
     except Exception:
         pass
