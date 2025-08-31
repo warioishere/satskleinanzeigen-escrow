@@ -12,12 +12,12 @@ def create_client(monkeypatch):
     import sqlite3, json, time
     def init_db():
         conn = sqlite3.connect(db_path); conn.row_factory=sqlite3.Row; cur = conn.cursor()
-        cur.execute("CREATE TABLE orders(order_id TEXT PRIMARY KEY, descriptor TEXT, idx INTEGER, min_conf INTEGER, label TEXT, amount_sat INTEGER, created_at INTEGER, state TEXT, funding_txid TEXT, vout INTEGER, confirmations INTEGER, partials TEXT, outputs TEXT, output_type TEXT, last_webhook_ts INTEGER, payout_txid TEXT, deadline_ts INTEGER)")
+        cur.execute("CREATE TABLE orders(order_id TEXT PRIMARY KEY, descriptor TEXT, idx INTEGER, min_conf INTEGER, label TEXT, amount_sat INTEGER, fee_est_sat INTEGER, created_at INTEGER, state TEXT, funding_txid TEXT, vout INTEGER, confirmations INTEGER, partials TEXT, outputs TEXT, output_type TEXT, last_webhook_ts INTEGER, payout_txid TEXT, deadline_ts INTEGER)")
         conn.commit(); conn.close()
     def next_index():
         conn = sqlite3.connect(db_path); conn.row_factory=sqlite3.Row; cur = conn.execute("SELECT MAX(idx) FROM orders"); row = cur.fetchone(); conn.close(); return (row[0]+1) if row and row[0] is not None else 0
-    def upsert_order(order_id, descriptor, index, min_conf, label, amount_sat):
-        conn = sqlite3.connect(db_path); conn.row_factory=sqlite3.Row; now = int(time.time()); conn.execute("INSERT OR REPLACE INTO orders(order_id, descriptor, idx, min_conf, label, amount_sat, created_at, state) VALUES(?,?,?,?,?,?,?,?)", (order_id, descriptor, index, min_conf, label, amount_sat, now, 'awaiting_deposit')); conn.commit(); conn.close()
+    def upsert_order(order_id, descriptor, index, min_conf, label, amount_sat, fee_est_sat):
+        conn = sqlite3.connect(db_path); conn.row_factory=sqlite3.Row; now = int(time.time()); conn.execute("INSERT OR REPLACE INTO orders(order_id, descriptor, idx, min_conf, label, amount_sat, fee_est_sat, created_at, state) VALUES(?,?,?,?,?,?,?,?,?)", (order_id, descriptor, index, min_conf, label, amount_sat, fee_est_sat, now, 'awaiting_deposit')); conn.commit(); conn.close()
     def get_order(order_id):
         conn = sqlite3.connect(db_path); conn.row_factory=sqlite3.Row; cur = conn.execute("SELECT * FROM orders WHERE order_id=?", (order_id,)); row = cur.fetchone(); conn.close(); return dict(row) if row else None
     def update_state(order_id, state, conf=None, deadline=None):
@@ -93,6 +93,8 @@ def stub_rpc(method, params=None):
         return 'txid123'
     if method == 'bumpfee':
         return {'txid':'bumped'}
+    if method == 'estimatesmartfee':
+        return {'feerate':0.0001}
     return {}
 
 
@@ -110,7 +112,9 @@ def test_payout_quote(monkeypatch):
     r=client.post('/orders', json=body, headers=headers)
     assert r.status_code==200
     r=client.get('/orders/orderQ/status', headers=headers)
-    assert r.json()['state']=='escrow_funded'
+    status = r.json()
+    assert status['state']=='escrow_funded'
+    assert status['fee_est_sat']==1500
     r=client.post('/orders/orderQ/payout_quote', json={'address':'tb1qseller111'}, headers=headers)
     assert r.status_code==200, r.text
     assert r.json()=={'payout_sat':55000,'fee_sat':5000}
@@ -125,7 +129,9 @@ def test_full_payout_flow(monkeypatch):
     r=client.post('/orders', json=body, headers=headers)
     assert r.status_code==200
     r=client.get('/orders/order1/status', headers=headers)
-    assert r.json()['state']=='escrow_funded'
+    st=r.json()
+    assert st['state']=='escrow_funded'
+    assert st['fee_est_sat']==1500
     r=client.post('/psbt/build', json={'order_id':'order1','outputs':{'tb1qseller111':55000}}, headers=headers)
     assert r.status_code==200, r.text
     assert r.json()['psbt']=='psbtP'
@@ -159,7 +165,9 @@ def test_refund_psbt(monkeypatch):
     r=client.post('/orders', json=body, headers=headers)
     assert r.status_code==200
     r=client.get('/orders/order2/status', headers=headers)
-    assert r.json()['state']=='escrow_funded'
+    st=r.json()
+    assert st['state']=='escrow_funded'
+    assert st['fee_est_sat']==1500
     r=client.post('/psbt/build_refund', json={'order_id':'order2','address':'tb1qrefunded0'}, headers=headers)
     assert r.status_code==200, r.text
     assert r.json()['psbt']=='psbtR'

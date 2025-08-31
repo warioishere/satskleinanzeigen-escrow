@@ -219,6 +219,7 @@ class StatusRes(BaseModel):
     funding: Optional[Dict[str, Any]] = None
     state: str
     deadline_ts: Optional[int] = None
+    fee_est_sat: Optional[int] = None
 
 class PSBTBuildReq(BaseModel):
     order_id: OrderID
@@ -470,6 +471,15 @@ def create_order(body: CreateOrderReq):
     desc_ck = f"{desc}#{info['checksum']}"
     label = f"escrow:{body.order_id}"
 
+    fee_est_sat = 0
+    try:
+        fee_res = rpc("estimatesmartfee", [3])
+        feerate = fee_res.get("feerate")
+        if feerate:
+            fee_est_sat = int(round(feerate * 1e5 * 150))
+    except Exception:
+        fee_est_sat = 0
+
     rpc("importdescriptors", [[{
         "desc": desc_ck,
         "timestamp": "now",
@@ -480,7 +490,7 @@ def create_order(body: CreateOrderReq):
     }]])
     addr = rpc("deriveaddresses", [desc_ck, [idx, idx]])[0]
 
-    db.upsert_order(body.order_id, desc_ck, idx, body.min_conf, label, body.amount_sat)
+    db.upsert_order(body.order_id, desc_ck, idx, body.min_conf, label, body.amount_sat, fee_est_sat)
     return CreateOrderRes(
         escrow_address=addr,
         descriptor=desc_ck,
@@ -495,7 +505,7 @@ def order_status(order_id: str):
         return StatusRes(state="awaiting_deposit")
     utxos = find_utxos_for_label(meta["label"], 0)
     if not utxos:
-        return StatusRes(state=meta["state"], deadline_ts=meta.get("deadline_ts"))
+        return StatusRes(state=meta["state"], deadline_ts=meta.get("deadline_ts"), fee_est_sat=meta.get("fee_est_sat"))
 
     total_sat = 0
     funding_utxos = []
@@ -539,6 +549,7 @@ def order_status(order_id: str):
         },
         state=state,
         deadline_ts=meta.get("deadline_ts"),
+        fee_est_sat=meta.get("fee_est_sat"),
     )
     return res
 
