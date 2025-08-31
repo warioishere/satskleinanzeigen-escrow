@@ -27,12 +27,15 @@ def init_db():
             vout INTEGER,
             confirmations INTEGER,
             partials TEXT,
+            outputs TEXT,
             last_webhook_ts INTEGER,
             payout_txid TEXT
         )
         """,
     )
     cols = [r[1] for r in cur.execute("PRAGMA table_info(orders)")]
+    if "outputs" not in cols:
+        cur.execute("ALTER TABLE orders ADD COLUMN outputs TEXT")
     if "payout_txid" not in cols:
         cur.execute("ALTER TABLE orders ADD COLUMN payout_txid TEXT")
     conn.commit()
@@ -104,6 +107,29 @@ def save_partials(order_id: str, partials: List[str]):
     )
     conn.commit()
     conn.close()
+
+
+def set_outputs(order_id: str, outputs: Dict[str, int]):
+    conn = get_conn()
+    conn.execute(
+        "UPDATE orders SET outputs=? WHERE order_id=?",
+        (json.dumps(outputs), order_id),
+    )
+    conn.commit()
+    conn.close()
+
+
+def get_outputs(order_id: str) -> Dict[str, int]:
+    conn = get_conn()
+    cur = conn.execute("SELECT outputs FROM orders WHERE order_id=?", (order_id,))
+    row = cur.fetchone()
+    conn.close()
+    if not row or not row["outputs"]:
+        return {}
+    try:
+        return json.loads(row["outputs"])
+    except Exception:
+        return {}
 
 
 def update_funding(order_id: str, txid: str, vout: int, confirmations: int):

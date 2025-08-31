@@ -447,6 +447,7 @@ def psbt_build(body: PSBTBuildReq):
     ins = [{"txid": u["txid"], "vout": u["vout"]} for u in utxos]
     outs_btc: List[Dict[str,float]] = [{addr: sats/1e8} for addr, sats in body.outputs.items()]
     psbt = rpc("createpsbt", [ins, outs_btc, 0, True])
+    db.set_outputs(body.order_id, body.outputs)
     advance_state(meta, "signing")
     return PSBTRes(psbt=psbt)
 
@@ -480,19 +481,82 @@ def psbt_decode(body: DecodeReq):
 
 @app.post("/psbt/finalize", dependencies=[Depends(require_api_key)])
 def psbt_finalize(body: FinalizeReq):
+    meta = None
     if body.order_id:
         order_id_var.set(body.order_id)
         meta = db.get_order(body.order_id)
         if not meta:
             raise HTTPException(404, "order not found")
+
+    if not body.psbt:
+        if meta and body.state == "dispute":
+            advance_state(meta, "dispute")
+            return {"hex": ""}
+        raise HTTPException(400, "missing psbt")
+
+    dec = rpc("decodepsbt", [body.psbt])
+    tx = dec.get("tx") or {}
+    vins = tx.get("vin", [])
+    vouts = tx.get("vout", [])
+
+    allowed = db.get_outputs(body.order_id) if body.order_id else {}
+    if body.order_id and not allowed:
+        log.error("psbt_missing_outputs", order_id=body.order_id)
+        raise HTTPException(400, "missing stored outputs")
+    in_total = 0
+    for vin in vins:
+        txid, vout = vin.get("txid"), vin.get("vout")
+        txinfo = rpc("gettransaction", [txid])
+        ok = False
+        label = meta.get("label") if meta else None
+        for det in txinfo.get("details", []):
+            if det.get("vout") == vout and det.get("label") == label:
+                ok = True
+                break
+        if meta and not ok:
+            log.error("psbt_invalid_input", txid=txid, vout=vout)
+            raise HTTPException(400, "input not from escrow label")
+        seq = vin.get("sequence", 0xffffffff)
+        if seq >= 0xfffffffe:
+            log.error("psbt_non_rbf", txid=txid, sequence=seq)
+            raise HTTPException(400, "RBF disabled")
+        txout = rpc("gettxout", [txid, vout])
+        if not txout or "value" not in txout:
+            log.error("psbt_missing_txout", txid=txid, vout=vout)
+            raise HTTPException(400, "missing input value")
+        in_total += int(round(txout["value"] * 1e8))
+
+    decoded_outputs: Dict[str, int] = {}
+    for o in vouts:
+        addrs = o.get("scriptPubKey", {}).get("addresses", [])
+        if len(addrs) != 1:
+            log.error("psbt_bad_output", output=o)
+            raise HTTPException(400, "unexpected output")
+        addr = addrs[0]
+        val_sat = int(round(o.get("value", 0) * 1e8))
+        decoded_outputs[addr] = val_sat
+
+    if decoded_outputs != allowed:
+        log.error("psbt_output_mismatch", expected=allowed, got=decoded_outputs)
+        raise HTTPException(400, "outputs mismatch")
+
+    out_total = sum(decoded_outputs.values())
+    fee = in_total - out_total
+    if fee < 0:
+        log.error("psbt_negative_fee", fee=fee)
+        raise HTTPException(400, "negative fee")
+    if "fee" in dec and abs(int(round(dec["fee"] * 1e8)) - fee) > 1:
+        log.error("psbt_fee_mismatch", psbt_fee=dec["fee"], calc_fee=fee / 1e8)
+        raise HTTPException(400, "fee mismatch")
+
     fin = rpc("finalizepsbt", [body.psbt])
     if not fin.get("complete"):
         raise HTTPException(400, "not enough signatures")
-    if body.order_id:
+    if meta:
         if body.state not in {"completed", "refunded", "dispute"}:
             raise HTTPException(400, "invalid final state")
         advance_state(meta, body.state)
-    return {"hex": fin["hex"]}
+    return {"hex": fin["hex"], "fee_sat": fee}
 
 @app.post("/tx/broadcast", dependencies=[Depends(require_api_key)])
 def tx_broadcast(body: BroadcastReq):
