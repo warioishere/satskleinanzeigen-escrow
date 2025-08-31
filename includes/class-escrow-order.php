@@ -149,7 +149,7 @@ class WEO_Order {
     }
 
     if ($cur && $cur == $buyer_id && $shipped && !$received) {
-      $n = wp_create_nonce('weo_ship_'.$order_id);
+      $n = wp_create_nonce('weo_recv_'.$order_id);
       echo '<form method="post" action="" style="margin-top:10px;">';
       echo '<input type="hidden" name="weo_action" value="mark_received">';
       echo '<input type="hidden" name="weo_nonce" value="'.$n.'">';
@@ -278,13 +278,21 @@ class WEO_Order {
     // Handle Actions direkt nach dem Panel (MVP)
     if (!empty($_POST['weo_action'])) {
       $act = sanitize_text_field($_POST['weo_action']);
-      if (in_array($act, ['mark_shipped','mark_received'])) {
+      if ($act === 'mark_shipped') {
         if (wp_verify_nonce($_POST['weo_nonce'] ?? '', 'weo_ship_'.$order_id)) {
-          if ($act === 'mark_shipped' && $cur && $cur == $vendor_id) {
+          if ($cur && $cur == $vendor_id) {
             $order->update_meta_data('_weo_shipped', time());
             $order->save();
             echo '<div class="notice weo weo-info"><p>Versand bestätigt.</p></div>';
-          } elseif ($act === 'mark_received' && $cur && $cur == $buyer_id) {
+          } else {
+            echo '<div class="notice weo weo-error"><p>Keine Berechtigung.</p></div>';
+          }
+        } else {
+          echo '<div class="notice weo weo-error"><p>Ungültiger Sicherheits-Token.</p></div>';
+        }
+      } elseif ($act === 'mark_received') {
+        if (wp_verify_nonce($_POST['weo_nonce'] ?? '', 'weo_recv_'.$order_id)) {
+          if ($cur && $cur == $buyer_id) {
             $order->update_meta_data('_weo_received', time());
             $order->save();
             echo '<div class="notice weo weo-info"><p>Empfang bestätigt.</p></div>';
