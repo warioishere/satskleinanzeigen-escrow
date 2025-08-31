@@ -5,7 +5,7 @@ require_once __DIR__ . '/../../includes/class-escrow-order.php';
 
 // Basic hooks
 function add_action($hook,$cb,$prio=10){}
-function do_action($hook,...$args){}
+function do_action($hook,...$args){ global $actions; $actions[]=['hook'=>$hook,'args'=>$args]; }
 function apply_filters($hook,$value){return $value;}
 
 // WordPress sanitizers / escaping
@@ -23,7 +23,10 @@ function wp_create_nonce($a){return 'nonce';}
 function wp_nonce_field($a){echo '<input type="hidden" name="_wpnonce" value="nonce" />';}
 function current_user_can($c){return true;}
 function date_i18n($f,$ts){return 'DATE';}
-function get_option($k){return 'Y-m-d';}
+function get_option($k){
+    if ($k === 'weo_vendor_payout_fallback') return 'bc1qtestfallbackaddress000000000000000000000';
+    return 'Y-m-d';
+}
 
 // Global state
 function wc_get_order($id){ global $test_order; return $test_order; }
@@ -61,6 +64,9 @@ function check_admin_referer($a=-1,$q='_wpnonce'){return true;}
 function current_time($t){return time();}
 function wp_next_scheduled($h,$a=[]){return false;}
 function wp_schedule_single_event($ts,$h,$a=[]){ global $scheduled; $scheduled[]=['ts'=>$ts,'hook'=>$h,'args'=>$a]; }
+function dokan_get_navigation_url($p){ return '/'.$p; }
+function wc_mail($to,$subject,$message){ global $mails; $mails[]=['to'=>$to,'subject'=>$subject,'message'=>$message]; }
+function get_userdata($id){ return (object)['user_email'=>'vendor'.$id.'@example.com']; }
 
 // Minimal WooCommerce replacements
 class WEO_Vendor{ public static function get_vendor_xpub_by_order($order_id){ return 'XSELLER'; } }
@@ -77,6 +83,7 @@ class FakeOrder{
   public function save(){}
   public function get_total(){return 1;}
   public function get_order_number(){return 'order1';}
+  public function get_billing_email(){return 'buyer@example.com';}
   public function update_status($s,$n){$this->status=$s; $this->notes[]=$n;}
   public function add_order_note($n){$this->notes[]=$n;}
 }

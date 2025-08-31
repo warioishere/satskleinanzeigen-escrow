@@ -114,6 +114,8 @@ class WEO_Order {
     echo '<li>'.esc_html__('Beide Parteien erstellen eine PSBT, signieren sie und laden sie hoch.', 'weo').'</li>';
     echo '</ol>';
     echo '<p>'.esc_html__('Die PSBT kann jederzeit im Dokan-Dashboard unter "Treuhand Service" erneut abgerufen und signiert werden.', 'weo').'</p>';
+    $dash_url = esc_url(dokan_get_navigation_url('weo-treuhand-orders'));
+    echo '<p><a href="'.$dash_url.'" class="button">'.esc_html__('Zum Treuhand-Dashboard', 'weo').'</a></p>';
     $doc_url = esc_url(plugins_url('docs/woo-user-guide.md', WEO_PLUGIN_FILE));
     echo '<p><a href="'.$doc_url.'" target="_blank" rel="noopener">'.esc_html__('Zur ausführlichen Anleitung', 'weo').'</a></p>';
 
@@ -154,6 +156,7 @@ class WEO_Order {
 
     $shipped  = intval($order->get_meta('_weo_shipped'));
     $received = intval($order->get_meta('_weo_received'));
+    $ready_release = $shipped && $received;
     echo '<p>Versand: ' . ($shipped ? date_i18n(get_option('date_format'), $shipped) : 'noch nicht bestätigt') . '</p>';
     echo '<p>Empfang: ' . ($received ? date_i18n(get_option('date_format'), $received) : 'noch nicht bestätigt') . '</p>';
 
@@ -245,7 +248,11 @@ class WEO_Order {
         echo '<input type="hidden" name="order_id" value="'.intval($order_id).'">';
         echo '<p><label>Signierte PSBT (Base64, Käufer)</label><br/>';
         echo '<textarea name="weo_signed_psbt" rows="6" style="width:100%" placeholder="PSBT…"></textarea></p>';
-        echo '<p><label><input type="checkbox" name="weo_release_funds" value="1"> '.esc_html__('Freigabe der Escrow-Mittel bestätigen','weo').'</label></p>';
+        if ($ready_release) {
+          echo '<p><label><input type="checkbox" name="weo_release_funds" value="1"> '.esc_html__('Freigabe der Escrow-Mittel bestätigen','weo').'</label></p>';
+        } else {
+          echo '<p>'.esc_html__('Versand/Empfang noch offen – Freigabe nicht möglich.','weo').'</p>';
+        }
         echo '<p><button class="button button-primary">PSBT hochladen</button></p>';
         echo '</form>';
       }
@@ -257,7 +264,11 @@ class WEO_Order {
         echo '<input type="hidden" name="order_id" value="'.intval($order_id).'">';
         echo '<p><label>Signierte PSBT (Base64, Verkäufer)</label><br/>';
         echo '<textarea name="weo_signed_psbt" rows="6" style="width:100%" placeholder="PSBT…"></textarea></p>';
-        echo '<p><label><input type="checkbox" name="weo_release_funds" value="1"> '.esc_html__('Freigabe der Escrow-Mittel bestätigen','weo').'</label></p>';
+        if ($ready_release) {
+          echo '<p><label><input type="checkbox" name="weo_release_funds" value="1"> '.esc_html__('Freigabe der Escrow-Mittel bestätigen','weo').'</label></p>';
+        } else {
+          echo '<p>'.esc_html__('Versand/Empfang noch offen – Freigabe nicht möglich.','weo').'</p>';
+        }
         echo '<p><button class="button button-primary">PSBT hochladen</button></p>';
         echo '</form>';
       }
@@ -449,6 +460,14 @@ class WEO_Order {
       wp_safe_redirect(wp_get_referer()); exit;
     }
 
+    // Versand/Empfang müssen bestätigt sein
+    $shipped  = intval($order->get_meta('_weo_shipped'));
+    $received = intval($order->get_meta('_weo_received'));
+    if (!$shipped || !$received) {
+      wc_add_notice(__('Versand/Empfang noch offen – Freigabe nicht möglich.','weo'), 'notice');
+      wp_safe_redirect(wp_get_referer()); exit;
+    }
+
     // Finalize
     $final = weo_api_post('/psbt/finalize', [
       'order_id' => $oid,
@@ -476,6 +495,7 @@ class WEO_Order {
       $order->delete_meta_data('_weo_dispute');
       $order->delete_meta_data('_weo_dispute_outcome');
       $order->save();
+      do_action('weo_tx_broadcasted', $order_id, $tx['txid']);
     } else {
       wc_add_notice('Broadcast fehlgeschlagen. Bitte Support kontaktieren.', 'error');
     }
@@ -571,7 +591,10 @@ class WEO_Order {
         if ($payout) return $payout;
       }
     }
-    return get_option('weo_vendor_payout_fallback','bc1qexamplefallbackaddressxxxxxxxxxxxxxxxxxx');
+    $fallback = get_option('weo_vendor_payout_fallback','');
+    if ($fallback) return $fallback;
+    wc_add_notice(__('Keine Fallback-Payout-Adresse konfiguriert.','weo'),'error');
+    throw new Exception('Fallback vendor payout address missing');
   }
 }
 
