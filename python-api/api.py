@@ -15,7 +15,11 @@ BTC_CORE_WALLET  = os.getenv("BTC_CORE_WALLET", "escrowwatch")
 PORT             = int(os.getenv("PORT", "8080"))
 API_KEYS         = {k.strip() for k in os.getenv("API_KEYS", "").split(",") if k.strip()}
 API_KEY_REVOKED  = {k.strip() for k in os.getenv("API_KEY_REVOKED", "").split(",") if k.strip()}
-ALLOW_ORIGINS    = [o.strip() for o in os.getenv("ALLOW_ORIGINS","*").split(",") if o.strip()]
+
+_origins_env = os.getenv("ALLOW_ORIGINS")
+if not _origins_env:
+    raise RuntimeError("ALLOW_ORIGINS env var required")
+ALLOW_ORIGINS    = [o.strip() for o in _origins_env.split(",") if o.strip()]
 WOO_CALLBACK_URL = os.getenv("WOO_CALLBACK_URL", "")
 WOO_HMAC_SECRET  = os.getenv("WOO_HMAC_SECRET", "")
 
@@ -23,7 +27,7 @@ WOO_HMAC_SECRET  = os.getenv("WOO_HMAC_SECRET", "")
 app = FastAPI(title="Escrow API (2-of-3 P2WSH, PSBT)")
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=ALLOW_ORIGINS if ALLOW_ORIGINS != ["*"] else ["*"],
+    allow_origins=ALLOW_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

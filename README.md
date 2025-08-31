@@ -20,3 +20,20 @@ When the API calls back into WooCommerce it signs the JSON body together with a 
 - `x-weo-ts` contains the timestamp (±5 minutes allowed)
 - `x-weo-sign` is `HMAC_SHA256(secret, ts + body)`
 - Requests with missing, stale, or mismatched signatures are rejected with `401`
+
+## CORS configuration
+
+The API enforces a strict origin whitelist. Set the `ALLOW_ORIGINS` environment
+variable to a comma-separated list of permitted shop domains.
+
+Example:
+
+```bash
+# production
+ALLOW_ORIGINS=https://shop.example.com
+
+# staging
+ALLOW_ORIGINS=https://shop-staging.example.com
+```
+
+After updating the value, redeploy the API so the new origins take effect.
