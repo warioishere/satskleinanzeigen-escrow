@@ -185,3 +185,80 @@ def test_psbt_decode_multi_input(monkeypatch):
     r = client.post('/psbt/decode', json={'psbt': 'multi'}, headers=headers)
     assert r.status_code == 200, r.text
     assert r.json()['sign_count'] == 3
+
+
+def test_stuck_worker_watch_only(monkeypatch):
+    client = create_client(monkeypatch)
+    import api
+
+    # Setup order in signing state past deadline
+    order = {
+        'order_id': 'orderW',
+        'state': 'signing',
+        'deadline_ts': 1,
+        'created_at': 0,
+        'output_type': 'payout',
+    }
+
+    def list_orders(states):
+        return [order]
+
+    def get_partials(order_id):
+        return ['partial1']
+
+    def rpc_stub(method, params=None):
+        if method == 'combinepsbt':
+            return 'oneSig'
+        if method == 'walletprocesspsbt':
+            return {'psbt': 'oneSig'}
+        if method == 'decodepsbt':
+            return {'inputs': [{'partial_signatures': {'a': 'sig'}}]}
+        return stub_rpc(method, params)
+
+    finalize_called = []
+    broadcast_called = []
+
+    def finalize_stub(req):
+        finalize_called.append(req)
+        return {'hex': 'deadbeef', 'complete': True}
+
+    def broadcast_stub(req):
+        broadcast_called.append(req)
+        return {'txid': 'txid123'}
+
+    class Logger:
+        def __init__(self):
+            self.events = []
+            self.errors = []
+        def info(self, event, **kw):
+            self.events.append((event, kw))
+        def warning(self, *a, **kw):
+            pass
+        def error(self, event, **kw):
+            self.errors.append((event, kw))
+
+    logger = Logger()
+
+    monkeypatch.setattr(api, 'rpc', rpc_stub)
+    monkeypatch.setattr(api.db, 'list_orders_by_states', list_orders)
+    monkeypatch.setattr(api.db, 'get_partials', get_partials)
+    monkeypatch.setattr(api, 'psbt_finalize', finalize_stub)
+    monkeypatch.setattr(api, 'tx_broadcast', broadcast_stub)
+    monkeypatch.setattr(api, 'log', logger)
+
+    def stop(*a, **kw):
+        raise SystemExit
+
+    monkeypatch.setattr(api.time, 'sleep', stop)
+
+    try:
+        api._stuck_worker()
+    except SystemExit:
+        pass
+
+    assert finalize_called == []
+    assert broadcast_called == []
+    assert logger.errors == []
+    assert ('watch_only_no_signatures', {'order_id': 'orderW', 'sign_count': 1}) in logger.events
+    assert ('deadline_escalation_skipped', {'order_id': 'orderW', 'sign_count': 1}) in logger.events
+    assert api.STUCK_COUNTER.labels(state='insufficient_signatures')._value.get() == 1

@@ -361,8 +361,18 @@ def _stuck_worker():
                         if not parts:
                             continue
                         merged = rpc("combinepsbt", [parts])
+                        pre_dec = rpc("decodepsbt", [merged])
+                        pre_sig = sum(len(i.get("partial_signatures", {})) for i in pre_dec.get("inputs", []))
                         signed = rpc("walletprocesspsbt", [merged])
                         signed_psbt = signed.get("psbt", merged)
+                        post_dec = rpc("decodepsbt", [signed_psbt])
+                        post_sig = sum(len(i.get("partial_signatures", {})) for i in post_dec.get("inputs", []))
+                        if post_sig == pre_sig:
+                            log.info("watch_only_no_signatures", order_id=o["order_id"], sign_count=post_sig)
+                        if post_sig < 2:
+                            STUCK_COUNTER.labels(state="insufficient_signatures").inc()
+                            log.info("deadline_escalation_skipped", order_id=o["order_id"], sign_count=post_sig)
+                            continue
                         final_state = "completed" if o.get("output_type") != "refund" else "refunded"
                         fin = psbt_finalize(FinalizeReq(order_id=o["order_id"], psbt=signed_psbt, state=final_state))
                         tx_broadcast(BroadcastReq(order_id=o["order_id"], hex=fin["hex"], state=final_state))
