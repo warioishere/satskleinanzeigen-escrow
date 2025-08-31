@@ -13,8 +13,9 @@ from ..models import (
     FinalizeReq,
 )
 from ..rpc import rpc, find_utxos_for_label
-from ..config import require_api_key, order_id_var, log
-from .. import advance_state, update_pending_gauge
+from ..config import require_api_key
+from ..logging import order_id_var, log
+from ..workers import advance_state, update_pending_gauge
 
 router = APIRouter()
 

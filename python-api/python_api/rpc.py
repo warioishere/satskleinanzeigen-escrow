@@ -1,6 +1,7 @@
 import time
 from typing import Any, List, Dict
 
+import time
 import requests
 from fastapi import HTTPException
 
@@ -9,12 +10,9 @@ from .config import (
     BTC_CORE_USER,
     BTC_CORE_PASS,
     BTC_CORE_WALLET,
-    log,
-    RPC_HIST,
-    req_id_var,
-    order_id_var,
-    actor_var,
 )
+from .logging import log, req_id_var, order_id_var, actor_var
+from .metrics import RPC_HIST
 
 
 def rpc(method: str, params: List[Any] = None) -> Any:

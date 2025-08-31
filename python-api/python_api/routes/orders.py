@@ -11,8 +11,9 @@ from ..models import (
     PayoutQuoteRes,
 )
 from ..rpc import rpc, build_descriptor, find_utxos_for_label
-from ..config import require_api_key, order_id_var
-from .. import advance_state, woo_callback
+from ..config import require_api_key
+from ..logging import order_id_var
+from ..workers import advance_state, woo_callback
 
 router = APIRouter()
 

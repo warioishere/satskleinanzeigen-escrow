@@ -5,14 +5,10 @@ from prometheus_client import generate_latest, CONTENT_TYPE_LATEST
 import db
 from ..rpc import rpc
 from ..models import BroadcastReq, BumpFeeReq
-from ..config import (
-    require_api_key,
-    WEBHOOK_QUEUE_SIZE,
-    BROADCAST_FAIL,
-    order_id_var,
-    log,
-)
-from .. import _webhook_q, advance_state, woo_callback
+from ..config import require_api_key
+from ..metrics import WEBHOOK_QUEUE_SIZE, BROADCAST_FAIL
+from ..logging import order_id_var, log
+from ..workers import _webhook_q, advance_state, woo_callback
 
 router = APIRouter()
 

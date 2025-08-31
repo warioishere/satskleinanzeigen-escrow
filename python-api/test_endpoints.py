@@ -296,8 +296,10 @@ def test_psbt_decode_multi_input(monkeypatch):
 def test_stuck_worker_watch_only(monkeypatch):
     client = create_client(monkeypatch)
     import python_api
+    import python_api.workers as workers
+    import python_api.routes.psbt as psbt_routes
+    import python_api.routes.admin as admin_routes
 
-    # Setup order in signing state past deadline
     order = {
         'order_id': 'orderW',
         'state': 'signing',
@@ -345,20 +347,20 @@ def test_stuck_worker_watch_only(monkeypatch):
 
     logger = Logger()
 
-    monkeypatch.setattr(python_api, 'rpc', rpc_stub)
-    monkeypatch.setattr(python_api.db, 'list_orders_by_states', list_orders)
-    monkeypatch.setattr(python_api.db, 'get_partials', get_partials)
-    monkeypatch.setattr(python_api, 'psbt_finalize', finalize_stub)
-    monkeypatch.setattr(python_api, 'tx_broadcast', broadcast_stub)
-    monkeypatch.setattr(python_api, 'log', logger)
+    monkeypatch.setattr(workers, 'rpc', rpc_stub)
+    monkeypatch.setattr(workers.db, 'list_orders_by_states', list_orders)
+    monkeypatch.setattr(workers.db, 'get_partials', get_partials)
+    monkeypatch.setattr(psbt_routes, 'psbt_finalize', finalize_stub)
+    monkeypatch.setattr(admin_routes, 'tx_broadcast', broadcast_stub)
+    monkeypatch.setattr(workers, 'log', logger)
 
     def stop(*a, **kw):
         raise SystemExit
 
-    monkeypatch.setattr(python_api.time, 'sleep', stop)
+    monkeypatch.setattr(workers.time, 'sleep', stop)
 
     try:
-        python_api._stuck_worker()
+        workers._stuck_worker()
     except SystemExit:
         pass
 
