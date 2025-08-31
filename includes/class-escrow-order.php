@@ -15,6 +15,7 @@ class WEO_Order {
     // Upload signierter PSBTs
     add_action('admin_post_weo_upload_psbt_buyer',  [$this,'handle_upload']);
     add_action('admin_post_weo_upload_psbt_seller', [$this,'handle_upload']);
+    add_action('admin_post_weo_open_dispute',       [$this,'open_dispute']);
 
     // Assets
     add_action('wp_enqueue_scripts', [$this,'enqueue_assets']);
@@ -141,16 +142,27 @@ class WEO_Order {
       echo '</form>';
     }
 
-    // PSBT-Flow nur wenn funded
-    if ($state === 'escrow_funded') {
+    if (in_array($state, ['escrow_funded','signing'])) {
+      $upload_url = esc_url(admin_url('admin-post.php'));
+      echo '<form method="post" action="'.$upload_url.'" style="margin-top:10px;">';
+      echo '<input type="hidden" name="action" value="weo_open_dispute">';
+      echo '<input type="hidden" name="order_id" value="'.intval($order_id).'">';
+      echo '<p><button class="button">Dispute eröffnen</button></p>';
+      echo '</form>';
+    }
+
+    // PSBT-Flow wenn Escrow funded, Signing läuft oder Disput
+    if (in_array($state, ['escrow_funded','signing','dispute'])) {
       $nonce = wp_create_nonce('weo_psbt_'.$order_id);
 
-      // PSBT (Payout) erstellen
-      echo '<form method="post" action="" style="margin-top:15px;">';
-      echo '<input type="hidden" name="weo_action" value="build_psbt_payout">';
-      echo '<input type="hidden" name="weo_nonce" value="'.$nonce.'">';
-      echo '<p><button class="button">PSBT (Auszahlung an Verkäufer) erstellen</button></p>';
-      echo '</form>';
+      if ($state !== 'dispute') {
+        // PSBT (Payout) erstellen
+        echo '<form method="post" action="" style="margin-top:15px;">';
+        echo '<input type="hidden" name="weo_action" value="build_psbt_payout">';
+        echo '<input type="hidden" name="weo_nonce" value="'.$nonce.'">';
+        echo '<p><button class="button">PSBT (Auszahlung an Verkäufer) erstellen</button></p>';
+        echo '</form>';
+      }
 
       // PSBT (Refund) erstellen
       echo '<form method="post" action="" style="margin-top:10px;">';
@@ -345,6 +357,57 @@ class WEO_Order {
       $order->update_status('completed', 'Escrow ausgezahlt. TXID: '.$tx['txid']);
     }
 
+    wp_safe_redirect(wp_get_referer()); exit;
+  }
+
+  /** Dispute eröffnen → optional finalize/broadcast mit State 'dispute' */
+  public function open_dispute() {
+    if (!is_user_logged_in()) wp_die('Nicht erlaubt.');
+    $order_id = intval($_POST['order_id'] ?? 0);
+    if (!$order_id) wp_die('Fehlende Order-ID.');
+    $order = wc_get_order($order_id); if (!$order) wp_die('Bestellung nicht gefunden.');
+
+    $buyer_id  = $order->get_user_id();
+    $vendor_id = $order->get_meta('_weo_vendor_id');
+    if (!$vendor_id) { $this->fallback_vendor_payout_address($order_id); $vendor_id = $order->get_meta('_weo_vendor_id'); }
+    $cur = get_current_user_id();
+    if ($cur !== $buyer_id && $cur !== $vendor_id) wp_die('Nicht erlaubt.');
+
+    $all_partials = array_merge(
+      (array)$order->get_meta('_weo_psbt_partials_buyer'),
+      (array)$order->get_meta('_weo_psbt_partials_seller')
+    );
+    $psbt = '';
+    if ($all_partials) {
+      $merge = weo_api_post('/psbt/merge', [
+        'order_id' => (string)$order->get_order_number(),
+        'partials' => $all_partials
+      ]);
+      if (!is_wp_error($merge) && !empty($merge['psbt'])) $psbt = $merge['psbt'];
+    }
+
+    if ($psbt) {
+      $final = weo_api_post('/psbt/finalize', [
+        'order_id' => (string)$order->get_order_number(),
+        'psbt'     => $psbt,
+        'state'    => 'dispute'
+      ]);
+      if (!is_wp_error($final) && !empty($final['hex'])) {
+        weo_api_post('/tx/broadcast', [
+          'hex'      => $final['hex'],
+          'order_id' => (string)$order->get_order_number(),
+          'state'    => 'dispute'
+        ]);
+      }
+    } else {
+      weo_api_post('/psbt/finalize', [
+        'order_id' => (string)$order->get_order_number(),
+        'psbt'     => '',
+        'state'    => 'dispute'
+      ]);
+    }
+
+    $order->update_status('on-hold', 'Dispute eröffnet');
     wp_safe_redirect(wp_get_referer()); exit;
   }
 
