@@ -43,10 +43,11 @@ class WEO_Psbt {
       'address'     => $payoutAddr,
       'target_conf' => 3,
     ]);
-    if (is_wp_error($quote) || empty($quote['payout_sat'])) {
+    if (is_wp_error($quote) || !isset($quote['fee_sat'])) {
       return new WP_Error('weo_psbt', __('Fee-Kalkulation fehlgeschlagen.','weo'));
     }
-    $amount_sats = intval($quote['payout_sat']);
+    $price_sat = intval( round( floatval($order->get_total()) * 100000000 ) );
+    $amount_sats = $price_sat + intval($quote['fee_sat']);
     if ($amount_sats <= 0 || !weo_validate_amount($amount_sats)) {
       return new WP_Error('weo_psbt', __('Betrag ungültig.','weo'));
     }
