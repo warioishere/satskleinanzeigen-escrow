@@ -19,9 +19,10 @@ def create_client():
     stub.list_orders_by_states = lambda states: []
     stub.get_partials = lambda order_id: []
     sys.modules["db"] = stub
-    sys.modules.pop("api", None)
-    import api
-    return TestClient(api.app)
+    for m in [k for k in list(sys.modules.keys()) if k.startswith('python_api')]:
+        sys.modules.pop(m, None)
+    import python_api
+    return TestClient(python_api.app)
 
 
 def test_rate_limit_blocks_after_threshold():

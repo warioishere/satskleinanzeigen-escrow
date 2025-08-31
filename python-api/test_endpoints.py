@@ -44,15 +44,16 @@ def create_client(monkeypatch):
     stub.count_pending_signatures=lambda:0
     stub.list_orders_by_states=lambda states: []
     sys.modules['db']=stub
-    sys.modules.pop('api', None)
+    for m in [k for k in list(sys.modules.keys()) if k.startswith('python_api')]:
+        sys.modules.pop(m, None)
     from prometheus_client import REGISTRY
     for c in list(REGISTRY._collector_to_names.keys()):
         try:
             REGISTRY.unregister(c)
         except Exception:
             pass
-    import api
-    return TestClient(api.app)
+    import python_api
+    return TestClient(python_api.app)
 
 
 def stub_rpc(method, params=None):
@@ -115,9 +116,17 @@ def stub_utxos_short(label, min_conf):
 
 def test_payout_quote(monkeypatch):
     client=create_client(monkeypatch)
-    import api
-    monkeypatch.setattr(api, 'rpc', stub_rpc)
-    monkeypatch.setattr(api, 'find_utxos_for_label', stub_utxos)
+    import python_api
+    import importlib
+    rpc_module = importlib.import_module('python_api.rpc')
+    orders_module = importlib.import_module('python_api.routes.orders')
+    psbt_module = importlib.import_module('python_api.routes.psbt')
+    admin_module = importlib.import_module('python_api.routes.admin')
+    monkeypatch.setattr(rpc_module, 'rpc', stub_rpc)
+    monkeypatch.setattr(python_api, 'rpc', stub_rpc)
+    monkeypatch.setattr(orders_module, 'rpc', stub_rpc)
+    monkeypatch.setattr(orders_module, 'find_utxos_for_label', stub_utxos)
+    monkeypatch.setattr(psbt_module, 'rpc', stub_rpc)
     headers={'x-api-key':'testkey'}
     body={'order_id':'orderQ','buyer':{'xpub':'X'},'seller':{'xpub':'Y'},'escrow':{'xpub':'Z'},'min_conf':2,'amount_sat':60000}
     r=client.post('/orders', json=body, headers=headers)
@@ -132,9 +141,19 @@ def test_payout_quote(monkeypatch):
 
 def test_full_payout_flow(monkeypatch):
     client=create_client(monkeypatch)
-    import api
-    monkeypatch.setattr(api, 'rpc', stub_rpc)
-    monkeypatch.setattr(api, 'find_utxos_for_label', stub_utxos)
+    import python_api
+    import importlib
+    rpc_module = importlib.import_module('python_api.rpc')
+    orders_module = importlib.import_module('python_api.routes.orders')
+    psbt_module = importlib.import_module('python_api.routes.psbt')
+    admin_module = importlib.import_module('python_api.routes.admin')
+    monkeypatch.setattr(rpc_module, 'rpc', stub_rpc)
+    monkeypatch.setattr(python_api, 'rpc', stub_rpc)
+    monkeypatch.setattr(orders_module, 'rpc', stub_rpc)
+    monkeypatch.setattr(orders_module, 'find_utxos_for_label', stub_utxos)
+    monkeypatch.setattr(psbt_module, 'rpc', stub_rpc)
+    monkeypatch.setattr(psbt_module, 'find_utxos_for_label', stub_utxos)
+    monkeypatch.setattr(admin_module, 'rpc', stub_rpc)
     headers={'x-api-key':'testkey'}
     body={'order_id':'order1','buyer':{'xpub':'X'},'seller':{'xpub':'Y'},'escrow':{'xpub':'Z'},'min_conf':2,'amount_sat':60000}
     r=client.post('/orders', json=body, headers=headers)
@@ -173,9 +192,17 @@ def test_full_payout_flow(monkeypatch):
 
 def test_payout_build_insufficient(monkeypatch):
     client = create_client(monkeypatch)
-    import api
-    monkeypatch.setattr(api, 'rpc', stub_rpc)
-    monkeypatch.setattr(api, 'find_utxos_for_label', stub_utxos_insuf)
+    import python_api
+    import importlib
+    rpc_module = importlib.import_module('python_api.rpc')
+    orders_module = importlib.import_module('python_api.routes.orders')
+    psbt_module = importlib.import_module('python_api.routes.psbt')
+    monkeypatch.setattr(rpc_module, 'rpc', stub_rpc)
+    monkeypatch.setattr(python_api, 'rpc', stub_rpc)
+    monkeypatch.setattr(orders_module, 'rpc', stub_rpc)
+    monkeypatch.setattr(orders_module, 'find_utxos_for_label', stub_utxos_insuf)
+    monkeypatch.setattr(psbt_module, 'rpc', stub_rpc)
+    monkeypatch.setattr(psbt_module, 'find_utxos_for_label', stub_utxos_insuf)
     headers = {'x-api-key': 'testkey'}
     body = {'order_id': 'orderI', 'buyer': {'xpub': 'X'}, 'seller': {'xpub': 'Y'}, 'escrow': {'xpub': 'Z'}, 'min_conf': 2, 'amount_sat': 60000}
     r = client.post('/orders', json=body, headers=headers)
@@ -190,9 +217,17 @@ def test_payout_build_insufficient(monkeypatch):
 
 def test_refund_psbt(monkeypatch):
     client=create_client(monkeypatch)
-    import api
-    monkeypatch.setattr(api, 'rpc', stub_rpc)
-    monkeypatch.setattr(api, 'find_utxos_for_label', stub_utxos)
+    import python_api
+    import importlib
+    rpc_module = importlib.import_module('python_api.rpc')
+    orders_module = importlib.import_module('python_api.routes.orders')
+    psbt_module = importlib.import_module('python_api.routes.psbt')
+    monkeypatch.setattr(rpc_module, 'rpc', stub_rpc)
+    monkeypatch.setattr(python_api, 'rpc', stub_rpc)
+    monkeypatch.setattr(orders_module, 'rpc', stub_rpc)
+    monkeypatch.setattr(orders_module, 'find_utxos_for_label', stub_utxos)
+    monkeypatch.setattr(psbt_module, 'rpc', stub_rpc)
+    monkeypatch.setattr(psbt_module, 'find_utxos_for_label', stub_utxos)
     headers={'x-api-key':'testkey'}
     body={'order_id':'order2','buyer':{'xpub':'X'},'seller':{'xpub':'Y'},'escrow':{'xpub':'Z'},'min_conf':2,'amount_sat':60000}
     r=client.post('/orders', json=body, headers=headers)
@@ -208,9 +243,17 @@ def test_refund_psbt(monkeypatch):
 
 def test_underfunded_deposit(monkeypatch):
     client = create_client(monkeypatch)
-    import api
-    monkeypatch.setattr(api, 'rpc', stub_rpc)
-    monkeypatch.setattr(api, 'find_utxos_for_label', stub_utxos_short)
+    import python_api
+    import importlib
+    rpc_module = importlib.import_module('python_api.rpc')
+    orders_module = importlib.import_module('python_api.routes.orders')
+    psbt_module = importlib.import_module('python_api.routes.psbt')
+    monkeypatch.setattr(rpc_module, 'rpc', stub_rpc)
+    monkeypatch.setattr(python_api, 'rpc', stub_rpc)
+    monkeypatch.setattr(orders_module, 'rpc', stub_rpc)
+    monkeypatch.setattr(orders_module, 'find_utxos_for_label', stub_utxos_short)
+    monkeypatch.setattr(psbt_module, 'rpc', stub_rpc)
+    monkeypatch.setattr(psbt_module, 'find_utxos_for_label', stub_utxos_short)
     headers = {'x-api-key': 'testkey'}
     body = {'order_id': 'orderU', 'buyer': {'xpub': 'X'}, 'seller': {'xpub': 'Y'}, 'escrow': {'xpub': 'Z'}, 'min_conf': 2, 'amount_sat': 60000}
     r = client.post('/orders', json=body, headers=headers)
@@ -224,7 +267,11 @@ def test_underfunded_deposit(monkeypatch):
 
 def test_psbt_decode_multi_input(monkeypatch):
     client = create_client(monkeypatch)
-    import api
+    import python_api
+    import importlib
+    rpc_module = importlib.import_module('python_api.rpc')
+    orders_module = importlib.import_module('python_api.routes.orders')
+    psbt_module = importlib.import_module('python_api.routes.psbt')
 
     def stub_rpc_multi(method, params=None):
         if method == 'decodepsbt' and params[0] == 'multi':
@@ -237,7 +284,9 @@ def test_psbt_decode_multi_input(monkeypatch):
             }
         return stub_rpc(method, params)
 
-    monkeypatch.setattr(api, 'rpc', stub_rpc_multi)
+    monkeypatch.setattr(python_api, 'rpc', stub_rpc_multi)
+    monkeypatch.setattr(rpc_module, 'rpc', stub_rpc_multi)
+    monkeypatch.setattr(psbt_module, 'rpc', stub_rpc_multi)
     headers = {'x-api-key': 'testkey'}
     r = client.post('/psbt/decode', json={'psbt': 'multi'}, headers=headers)
     assert r.status_code == 200, r.text
@@ -246,7 +295,7 @@ def test_psbt_decode_multi_input(monkeypatch):
 
 def test_stuck_worker_watch_only(monkeypatch):
     client = create_client(monkeypatch)
-    import api
+    import python_api
 
     # Setup order in signing state past deadline
     order = {
@@ -296,20 +345,20 @@ def test_stuck_worker_watch_only(monkeypatch):
 
     logger = Logger()
 
-    monkeypatch.setattr(api, 'rpc', rpc_stub)
-    monkeypatch.setattr(api.db, 'list_orders_by_states', list_orders)
-    monkeypatch.setattr(api.db, 'get_partials', get_partials)
-    monkeypatch.setattr(api, 'psbt_finalize', finalize_stub)
-    monkeypatch.setattr(api, 'tx_broadcast', broadcast_stub)
-    monkeypatch.setattr(api, 'log', logger)
+    monkeypatch.setattr(python_api, 'rpc', rpc_stub)
+    monkeypatch.setattr(python_api.db, 'list_orders_by_states', list_orders)
+    monkeypatch.setattr(python_api.db, 'get_partials', get_partials)
+    monkeypatch.setattr(python_api, 'psbt_finalize', finalize_stub)
+    monkeypatch.setattr(python_api, 'tx_broadcast', broadcast_stub)
+    monkeypatch.setattr(python_api, 'log', logger)
 
     def stop(*a, **kw):
         raise SystemExit
 
-    monkeypatch.setattr(api.time, 'sleep', stop)
+    monkeypatch.setattr(python_api.time, 'sleep', stop)
 
     try:
-        api._stuck_worker()
+        python_api._stuck_worker()
     except SystemExit:
         pass
 
@@ -318,4 +367,4 @@ def test_stuck_worker_watch_only(monkeypatch):
     assert logger.errors == []
     assert ('watch_only_no_signatures', {'order_id': 'orderW', 'sign_count': 1}) in logger.events
     assert ('deadline_escalation_skipped', {'order_id': 'orderW', 'sign_count': 1}) in logger.events
-    assert api.STUCK_COUNTER.labels(state='insufficient_signatures')._value.get() == 1
+    assert python_api.STUCK_COUNTER.labels(state='insufficient_signatures')._value.get() == 1
