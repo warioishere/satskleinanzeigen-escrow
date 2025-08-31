@@ -129,6 +129,34 @@ class WEO_Order {
     $signs = intval($order->get_meta('_weo_psbt_sign_count'));
     echo '<p>Signaturen: '. $signs . '/2</p>';
 
+    $shipped  = intval($order->get_meta('_weo_shipped'));
+    $received = intval($order->get_meta('_weo_received'));
+    echo '<p>Versand: ' . ($shipped ? date_i18n(get_option('date_format'), $shipped) : 'noch nicht bestätigt') . '</p>';
+    echo '<p>Empfang: ' . ($received ? date_i18n(get_option('date_format'), $received) : 'noch nicht bestätigt') . '</p>';
+
+    $cur      = get_current_user_id();
+    $buyer_id  = $order->get_user_id();
+    $vendor_id = $order->get_meta('_weo_vendor_id');
+    if (!$vendor_id) { $this->fallback_vendor_payout_address($order_id); $vendor_id = $order->get_meta('_weo_vendor_id'); }
+
+    if ($cur && $cur == $vendor_id && !$shipped) {
+      $n = wp_create_nonce('weo_ship_'.$order_id);
+      echo '<form method="post" action="" style="margin-top:10px;">';
+      echo '<input type="hidden" name="weo_action" value="mark_shipped">';
+      echo '<input type="hidden" name="weo_nonce" value="'.$n.'">';
+      echo '<p><button class="button">Als versendet markieren</button></p>';
+      echo '</form>';
+    }
+
+    if ($cur && $cur == $buyer_id && $shipped && !$received) {
+      $n = wp_create_nonce('weo_ship_'.$order_id);
+      echo '<form method="post" action="" style="margin-top:10px;">';
+      echo '<input type="hidden" name="weo_action" value="mark_received">';
+      echo '<input type="hidden" name="weo_nonce" value="'.$n.'">';
+      echo '<p><button class="button">Empfang bestätigen</button></p>';
+      echo '</form>';
+    }
+
     $payout_txid = $order->get_meta('_weo_payout_txid');
     if ($state === 'signing' || $payout_txid) {
       $nonce = wp_create_nonce('weo_psbt_'.$order_id);
@@ -247,79 +275,98 @@ class WEO_Order {
     })();
     </script>";
 
-    // Handle PSBT-Build oder Fee-Bump direkt nach dem Panel (MVP)
-    if (!empty($_POST['weo_action']) && wp_verify_nonce($_POST['weo_nonce'],'weo_psbt_'.$order_id)) {
-      if ($_POST['weo_action'] === 'bumpfee') {
-        $target = intval($_POST['target_conf'] ?? 1);
-        $resp = weo_api_post('/tx/bumpfee', [
-          'order_id'    => (string)$order->get_order_number(),
-          'target_conf' => $target
-        ]);
-        if (!is_wp_error($resp) && !empty($resp['txid'])) {
-          $order->update_meta_data('_weo_payout_txid', $resp['txid']);
-          $order->save();
-          echo '<div class="notice weo weo-info"><p>Gebühr erhöht. Neue TXID: '.esc_html($resp['txid']).'</p></div>';
+    // Handle Actions direkt nach dem Panel (MVP)
+    if (!empty($_POST['weo_action'])) {
+      $act = sanitize_text_field($_POST['weo_action']);
+      if (in_array($act, ['mark_shipped','mark_received'])) {
+        if (wp_verify_nonce($_POST['weo_nonce'] ?? '', 'weo_ship_'.$order_id)) {
+          if ($act === 'mark_shipped' && $cur && $cur == $vendor_id) {
+            $order->update_meta_data('_weo_shipped', time());
+            $order->save();
+            echo '<div class="notice weo weo-info"><p>Versand bestätigt.</p></div>';
+          } elseif ($act === 'mark_received' && $cur && $cur == $buyer_id) {
+            $order->update_meta_data('_weo_received', time());
+            $order->save();
+            echo '<div class="notice weo weo-info"><p>Empfang bestätigt.</p></div>';
+          } else {
+            echo '<div class="notice weo weo-error"><p>Keine Berechtigung.</p></div>';
+          }
         } else {
-          echo '<div class="notice weo weo-error"><p>Fee-Bump fehlgeschlagen.</p></div>';
+          echo '<div class="notice weo weo-error"><p>Ungültiger Sicherheits-Token.</p></div>';
         }
-      } else {
-        $oid = weo_sanitize_order_id((string)$order->get_order_number());
-        if ($_POST['weo_action'] === 'build_psbt_payout') {
-          $payoutAddr = get_user_meta($order->get_meta('_weo_vendor_id'), 'weo_vendor_payout_address', true);
-          if (!$payoutAddr) $payoutAddr = $this->fallback_vendor_payout_address($order_id);
-          if (!weo_validate_btc_address($payoutAddr)) {
-            echo '<div class="notice weo weo-error"><p>Payout-Adresse ungültig.</p></div>';
-            return;
-          }
-          $status = weo_api_get('/orders/'.rawurlencode($oid).'/status');
-          $funded = is_wp_error($status) ? 0 : intval($status['funding']['total_sat'] ?? 0);
-          if ($funded <= 0) {
-            echo '<div class="notice weo weo-error"><p>Keine Escrow-Einzahlung gefunden.</p></div>';
-            return;
-          }
-          $quote = weo_api_post('/orders/'.rawurlencode($oid).'/payout_quote', [
-            'address'     => $payoutAddr,
-            'target_conf' => 3,
+      } elseif (wp_verify_nonce($_POST['weo_nonce'] ?? '', 'weo_psbt_'.$order_id)) {
+        if ($act === 'bumpfee') {
+          $target = intval($_POST['target_conf'] ?? 1);
+          $resp = weo_api_post('/tx/bumpfee', [
+            'order_id'    => (string)$order->get_order_number(),
+            'target_conf' => $target
           ]);
-          if (is_wp_error($quote) || empty($quote['payout_sat'])) {
-            echo '<div class="notice weo weo-error"><p>Fee-Kalkulation fehlgeschlagen.</p></div>';
-            return;
+          if (!is_wp_error($resp) && !empty($resp['txid'])) {
+            $order->update_meta_data('_weo_payout_txid', $resp['txid']);
+            $order->save();
+            echo '<div class="notice weo weo-info"><p>Gebühr erhöht. Neue TXID: '.esc_html($resp['txid']).'</p></div>';
+          } else {
+            echo '<div class="notice weo weo-error"><p>Fee-Bump fehlgeschlagen.</p></div>';
           }
-          $amount_sats = intval($quote['payout_sat']);
-          if ($amount_sats <= 0 || !weo_validate_amount($amount_sats)) {
-            echo '<div class="notice weo weo-error"><p>Betrag ungültig.</p></div>';
-            return;
-          }
-          $resp = weo_api_post('/psbt/build', [
-            'order_id'    => $oid,
-            'outputs'     => [ $payoutAddr => $amount_sats ],
-            'rbf'         => true,
-            'target_conf' => 3,
-          ]);
-        } elseif ($_POST['weo_action'] === 'build_psbt_refund') {
-          $refundAddr = get_user_meta($order->get_user_id(), 'weo_buyer_payout_address', true);
-          if (!$refundAddr) {
-            echo '<div class="notice weo weo-error"><p>Keine Käuferadresse hinterlegt.</p></div>';
-            return;
-          }
-          if (!weo_validate_btc_address($refundAddr)) {
-            echo '<div class="notice weo weo-error"><p>Adresse ungültig.</p></div>';
-            return;
-          }
-          $resp = weo_api_post('/psbt/build_refund', [
-            'order_id'    => $oid,
-            'address'     => $refundAddr,
-            'target_conf' => 3
-          ]);
         } else {
-          $resp = null;
-        }
+          $oid = weo_sanitize_order_id((string)$order->get_order_number());
+          if ($act === 'build_psbt_payout') {
+            $payoutAddr = get_user_meta($order->get_meta('_weo_vendor_id'), 'weo_vendor_payout_address', true);
+            if (!$payoutAddr) $payoutAddr = $this->fallback_vendor_payout_address($order_id);
+            if (!weo_validate_btc_address($payoutAddr)) {
+              echo '<div class="notice weo weo-error"><p>Payout-Adresse ungültig.</p></div>';
+              return;
+            }
+            $status = weo_api_get('/orders/'.rawurlencode($oid).'/status');
+            $funded = is_wp_error($status) ? 0 : intval($status['funding']['total_sat'] ?? 0);
+            if ($funded <= 0) {
+              echo '<div class="notice weo weo-error"><p>Keine Escrow-Einzahlung gefunden.</p></div>';
+              return;
+            }
+            $quote = weo_api_post('/orders/'.rawurlencode($oid).'/payout_quote', [
+              'address'     => $payoutAddr,
+              'target_conf' => 3,
+            ]);
+            if (is_wp_error($quote) || empty($quote['payout_sat'])) {
+              echo '<div class="notice weo weo-error"><p>Fee-Kalkulation fehlgeschlagen.</p></div>';
+              return;
+            }
+            $amount_sats = intval($quote['payout_sat']);
+            if ($amount_sats <= 0 || !weo_validate_amount($amount_sats)) {
+              echo '<div class="notice weo weo-error"><p>Betrag ungültig.</p></div>';
+              return;
+            }
+            $resp = weo_api_post('/psbt/build', [
+              'order_id'    => $oid,
+              'outputs'     => [ $payoutAddr => $amount_sats ],
+              'rbf'         => true,
+              'target_conf' => 3,
+            ]);
+          } elseif ($act === 'build_psbt_refund') {
+            $refundAddr = get_user_meta($order->get_user_id(), 'weo_buyer_payout_address', true);
+            if (!$refundAddr) {
+              echo '<div class="notice weo weo-error"><p>Keine Käuferadresse hinterlegt.</p></div>';
+              return;
+            }
+            if (!weo_validate_btc_address($refundAddr)) {
+              echo '<div class="notice weo weo-error"><p>Adresse ungültig.</p></div>';
+              return;
+            }
+            $resp = weo_api_post('/psbt/build_refund', [
+              'order_id'    => $oid,
+              'address'     => $refundAddr,
+              'target_conf' => 3
+            ]);
+          } else {
+            $resp = null;
+          }
 
-        if (!empty($resp) && !is_wp_error($resp) && !empty($resp['psbt'])) {
-          $psbt_b64 = esc_textarea($resp['psbt']);
-          echo '<div class="notice weo weo-info"><p><strong>PSBT (Base64):</strong></p><textarea rows="6" style="width:100%;">'.$psbt_b64.'</textarea><p>Bitte in deiner Wallet laden, signieren und unten wieder hochladen.</p></div>';
-        } elseif ($resp !== null) {
-          echo '<div class="notice weo weo-error"><p>PSBT konnte nicht erstellt werden.</p></div>';
+          if (!empty($resp) && !is_wp_error($resp) && !empty($resp['psbt'])) {
+            $psbt_b64 = esc_textarea($resp['psbt']);
+            echo '<div class="notice weo weo-info"><p><strong>PSBT (Base64):</strong></p><textarea rows="6" style="width:100%;">'.$psbt_b64.'</textarea><p>Bitte in deiner Wallet laden, signieren und unten wieder hochladen.</p></div>';
+          } elseif ($resp !== null) {
+            echo '<div class="notice weo weo-error"><p>PSBT konnte nicht erstellt werden.</p></div>';
+          }
         }
       }
     }

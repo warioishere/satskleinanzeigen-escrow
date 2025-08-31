@@ -37,69 +37,96 @@ class WEO_Dokan {
 
       if ('POST' === $_SERVER['REQUEST_METHOD'] && !empty($_POST['weo_action']) && !empty($_POST['order_id'])) {
         $order_id = intval($_POST['order_id']);
-        if (!wp_verify_nonce($_POST['weo_nonce'] ?? '', 'weo_psbt_'.$order_id)) {
-          dokan_add_notice(__('Ungültiger Sicherheits-Token','weo'),'error');
+        $order = wc_get_order($order_id);
+        if (!$order) {
+          dokan_add_notice(__('Bestellung nicht gefunden','weo'),'error');
         } else {
-          $order = wc_get_order($order_id);
-          if (!$order || intval($order->get_meta('_weo_vendor_id')) !== $user_id) {
-            dokan_add_notice(__('Keine Berechtigung','weo'),'error');
-          } else {
-            $oid = weo_sanitize_order_id((string)$order->get_order_number());
-            if ($_POST['weo_action'] === 'build_psbt_payout') {
-              $payoutAddr = get_user_meta($user_id,'weo_vendor_payout_address',true);
-              if (!$payoutAddr) $payoutAddr = $this->fallback_vendor_payout_address($order_id);
-              if (!weo_validate_btc_address($payoutAddr)) {
-                dokan_add_notice(__('Payout-Adresse ungültig.','weo'),'error');
+          $act = sanitize_text_field($_POST['weo_action']);
+          $vendor_id = intval($order->get_meta('_weo_vendor_id'));
+          $buyer_id  = $order->get_user_id();
+          if (in_array($act, ['mark_shipped','mark_received'])) {
+            if (!wp_verify_nonce($_POST['weo_nonce'] ?? '', 'weo_ship_'.$order_id)) {
+              dokan_add_notice(__('Ungültiger Sicherheits-Token','weo'),'error');
+            } elseif ($act === 'mark_shipped') {
+              if ($user_id !== $vendor_id) {
+                dokan_add_notice(__('Keine Berechtigung','weo'),'error');
               } else {
-                $status  = weo_api_get('/orders/'.rawurlencode($oid).'/status');
-                $funded  = is_wp_error($status) ? 0 : intval($status['funding']['total_sat'] ?? 0);
-                if ($funded <= 0) {
-                  dokan_add_notice(__('Keine Escrow-Einzahlung gefunden.','weo'),'error');
+                $order->update_meta_data('_weo_shipped', time());
+                $order->save();
+                dokan_add_notice(__('Versand markiert','weo'),'success');
+              }
+            } else { // mark_received
+              if ($user_id !== $buyer_id) {
+                dokan_add_notice(__('Keine Berechtigung','weo'),'error');
+              } else {
+                $order->update_meta_data('_weo_received', time());
+                $order->save();
+                dokan_add_notice(__('Empfang bestätigt','weo'),'success');
+              }
+            }
+          } else {
+            if (!wp_verify_nonce($_POST['weo_nonce'] ?? '', 'weo_psbt_'.$order_id)) {
+              dokan_add_notice(__('Ungültiger Sicherheits-Token','weo'),'error');
+            } elseif ($vendor_id !== $user_id) {
+              dokan_add_notice(__('Keine Berechtigung','weo'),'error');
+            } else {
+              $oid = weo_sanitize_order_id((string)$order->get_order_number());
+              if ($act === 'build_psbt_payout') {
+                $payoutAddr = get_user_meta($user_id,'weo_vendor_payout_address',true);
+                if (!$payoutAddr) $payoutAddr = $this->fallback_vendor_payout_address($order_id);
+                if (!weo_validate_btc_address($payoutAddr)) {
+                  dokan_add_notice(__('Payout-Adresse ungültig.','weo'),'error');
                 } else {
-                  $quote = weo_api_post('/orders/'.rawurlencode($oid).'/payout_quote', [
-                    'address'     => $payoutAddr,
-                    'target_conf' => 3,
-                  ]);
-                  if (is_wp_error($quote) || empty($quote['payout_sat'])) {
-                    dokan_add_notice(__('Fee-Kalkulation fehlgeschlagen.','weo'),'error');
+                  $status  = weo_api_get('/orders/'.rawurlencode($oid).'/status');
+                  $funded  = is_wp_error($status) ? 0 : intval($status['funding']['total_sat'] ?? 0);
+                  if ($funded <= 0) {
+                    dokan_add_notice(__('Keine Escrow-Einzahlung gefunden.','weo'),'error');
                   } else {
-                    $amount_sats = intval($quote['payout_sat']);
-                    if ($amount_sats <= 0 || !weo_validate_amount($amount_sats)) {
-                      dokan_add_notice(__('Betrag ungültig.','weo'),'error');
+                    $quote = weo_api_post('/orders/'.rawurlencode($oid).'/payout_quote', [
+                      'address'     => $payoutAddr,
+                      'target_conf' => 3,
+                    ]);
+                    if (is_wp_error($quote) || empty($quote['payout_sat'])) {
+                      dokan_add_notice(__('Fee-Kalkulation fehlgeschlagen.','weo'),'error');
                     } else {
-                      $resp = weo_api_post('/psbt/build', [
-                        'order_id'    => $oid,
-                        'outputs'     => [ $payoutAddr => $amount_sats ],
-                        'rbf'         => true,
-                        'target_conf' => 3,
-                      ]);
-                      if (!is_wp_error($resp) && !empty($resp['psbt'])) {
-                        $psbt_b64 = esc_textarea($resp['psbt']);
-                        $psbt_notice = '<div class="dokan-alert dokan-alert-success"><p><strong>'.esc_html__('PSBT (Base64)','weo').':</strong></p><textarea rows="4" style="width:100%;">'.$psbt_b64.'</textarea></div>';
+                      $amount_sats = intval($quote['payout_sat']);
+                      if ($amount_sats <= 0 || !weo_validate_amount($amount_sats)) {
+                        dokan_add_notice(__('Betrag ungültig.','weo'),'error');
                       } else {
-                        dokan_add_notice(__('PSBT konnte nicht erstellt werden.','weo'),'error');
+                        $resp = weo_api_post('/psbt/build', [
+                          'order_id'    => $oid,
+                          'outputs'     => [ $payoutAddr => $amount_sats ],
+                          'rbf'         => true,
+                          'target_conf' => 3,
+                        ]);
+                        if (!is_wp_error($resp) && !empty($resp['psbt'])) {
+                          $psbt_b64 = esc_textarea($resp['psbt']);
+                          $psbt_notice = '<div class="dokan-alert dokan-alert-success"><p><strong>'.esc_html__('PSBT (Base64)','weo').':</strong></p><textarea rows="4" style="width:100%;">'.$psbt_b64.'</textarea></div>';
+                        } else {
+                          dokan_add_notice(__('PSBT konnte nicht erstellt werden.','weo'),'error');
+                        }
                       }
                     }
                   }
                 }
-              }
-            } elseif ($_POST['weo_action'] === 'build_psbt_refund') {
-              $refundAddr = get_user_meta($order->get_user_id(), 'weo_buyer_payout_address', true);
-              if (!$refundAddr) {
-                dokan_add_notice(__('Keine Käuferadresse hinterlegt.','weo'),'error');
-              } elseif (!weo_validate_btc_address($refundAddr)) {
-                dokan_add_notice(__('Adresse ungültig.','weo'),'error');
-              } else {
-                $resp = weo_api_post('/psbt/build_refund', [
-                  'order_id'    => $oid,
-                  'address'     => $refundAddr,
-                  'target_conf' => 3,
-                ]);
-                if (!is_wp_error($resp) && !empty($resp['psbt'])) {
-                  $psbt_b64 = esc_textarea($resp['psbt']);
-                  $psbt_notice = '<div class="dokan-alert dokan-alert-success"><p><strong>'.esc_html__('PSBT (Base64)','weo').':</strong></p><textarea rows="4" style="width:100%;">'.$psbt_b64.'</textarea></div>';
+              } elseif ($act === 'build_psbt_refund') {
+                $refundAddr = get_user_meta($order->get_user_id(), 'weo_buyer_payout_address', true);
+                if (!$refundAddr) {
+                  dokan_add_notice(__('Keine Käuferadresse hinterlegt.','weo'),'error');
+                } elseif (!weo_validate_btc_address($refundAddr)) {
+                  dokan_add_notice(__('Adresse ungültig.','weo'),'error');
                 } else {
-                  dokan_add_notice(__('PSBT konnte nicht erstellt werden.','weo'),'error');
+                  $resp = weo_api_post('/psbt/build_refund', [
+                    'order_id'    => $oid,
+                    'address'     => $refundAddr,
+                    'target_conf' => 3,
+                  ]);
+                  if (!is_wp_error($resp) && !empty($resp['psbt'])) {
+                    $psbt_b64 = esc_textarea($resp['psbt']);
+                    $psbt_notice = '<div class="dokan-alert dokan-alert-success"><p><strong>'.esc_html__('PSBT (Base64)','weo').':</strong></p><textarea rows="4" style="width:100%;">'.$psbt_b64.'</textarea></div>';
+                  } else {
+                    dokan_add_notice(__('PSBT konnte nicht erstellt werden.','weo'),'error');
+                  }
                 }
               }
             }
@@ -133,11 +160,15 @@ class WEO_Dokan {
           }
         }
         $list[] = [
-          'id'      => $order->get_id(),
-          'number'  => $order->get_order_number(),
-          'addr'    => $addr,
-          'state'   => $state,
-          'funding' => $funding,
+          'id'       => $order->get_id(),
+          'number'   => $order->get_order_number(),
+          'addr'     => $addr,
+          'state'    => $state,
+          'funding'  => $funding,
+          'shipped'  => intval($order->get_meta('_weo_shipped')),
+          'received' => intval($order->get_meta('_weo_received')),
+          'buyer_id' => $order->get_user_id(),
+          'vendor_id'=> intval($order->get_meta('_weo_vendor_id')),
         ];
       }
 

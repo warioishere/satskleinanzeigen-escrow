@@ -17,6 +17,28 @@ if (!defined('ABSPATH')) exit;
         <p><strong><?php esc_html_e('Escrow-Adresse','weo'); ?>:</strong> <code id="weo_addr_<?php echo intval($o['id']); ?>"><?php echo esc_html($o['addr']); ?></code></p>
         <div class="weo-qr" id="weo_qr_<?php echo intval($o['id']); ?>"></div>
       <?php endif; ?>
+
+      <p><?php esc_html_e('Versand','weo'); ?>: <?php echo $o['shipped'] ? esc_html(date_i18n(get_option('date_format'), $o['shipped'])) : esc_html__('noch nicht bestätigt','weo'); ?></p>
+      <p><?php esc_html_e('Empfang','weo'); ?>: <?php echo $o['received'] ? esc_html(date_i18n(get_option('date_format'), $o['received'])) : esc_html__('noch nicht bestätigt','weo'); ?></p>
+
+      <?php $cur = get_current_user_id(); $ship_nonce = wp_create_nonce('weo_ship_'.$o['id']); ?>
+      <?php if ($cur && $cur == $o['vendor_id'] && empty($o['shipped'])) : ?>
+        <form method="post" class="dokan-form" style="margin-top:10px;">
+          <input type="hidden" name="order_id" value="<?php echo intval($o['id']); ?>">
+          <input type="hidden" name="weo_nonce" value="<?php echo esc_attr($ship_nonce); ?>">
+          <input type="hidden" name="weo_action" value="mark_shipped">
+          <button type="submit" class="dokan-btn"><?php esc_html_e('Als versendet markieren','weo'); ?></button>
+        </form>
+      <?php endif; ?>
+      <?php if ($cur && $cur == $o['buyer_id'] && $o['shipped'] && empty($o['received'])) : ?>
+        <form method="post" class="dokan-form" style="margin-top:10px;">
+          <input type="hidden" name="order_id" value="<?php echo intval($o['id']); ?>">
+          <input type="hidden" name="weo_nonce" value="<?php echo esc_attr($ship_nonce); ?>">
+          <input type="hidden" name="weo_action" value="mark_received">
+          <button type="submit" class="dokan-btn"><?php esc_html_e('Empfang bestätigen','weo'); ?></button>
+        </form>
+      <?php endif; ?>
+
       <?php if (in_array($o['state'], ['escrow_funded','signing','dispute'])) : ?>
         <?php $nonce = wp_create_nonce('weo_psbt_'.$o['id']); ?>
         <?php if ($o['state'] !== 'dispute') : ?>
