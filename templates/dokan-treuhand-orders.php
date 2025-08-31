@@ -7,6 +7,9 @@ if (!defined('ABSPATH')) exit;
     <div class="weo-escrow-order">
       <h3><?php echo esc_html(sprintf(__('Bestellung #%s','weo'), $o['number'])); ?></h3>
       <p><?php esc_html_e('Status','weo'); ?>: <strong><?php echo esc_html($o['state']); ?></strong></p>
+      <?php if ($o['state'] === 'dispute') : ?>
+        <div class="notice weo weo-warning"><p><?php esc_html_e('Dispute offen – bitte warte auf die Entscheidung des Administrators.','weo'); ?></p></div>
+      <?php endif; ?>
       <?php if (!empty($o['funding'])) : ?>
         <?php $f = $o['funding']; $txid = esc_html($f['txid'] ?? ''); $confs = intval($f['confirmations'] ?? 0); $val = isset($f['value_sat']) ? intval($f['value_sat']).' sats' : ''; ?>
         <p><?php esc_html_e('Funding TX','weo'); ?>: <code><?php echo $txid; ?></code> • <?php esc_html_e('Confs','weo'); ?>: <?php echo $confs; ?> • <?php esc_html_e('Betrag','weo'); ?>: <?php echo esc_html($val); ?></p>

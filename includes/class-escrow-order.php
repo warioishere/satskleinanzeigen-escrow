@@ -118,6 +118,9 @@ class WEO_Order {
       echo '<p>Noch keine Einzahlung erkannt.</p>';
     }
     echo '<p>Status: <strong>'.esc_html($state).'</strong></p>';
+    if ($state === 'dispute') {
+      echo '<div class="notice weo weo-warning"><p>'.esc_html__('Dispute offen – bitte warte auf die Entscheidung des Administrators.','weo').'</p></div>';
+    }
     if ($deadline) {
       if ($deadline > time()) {
         $dl = intval($deadline);
@@ -191,7 +194,7 @@ class WEO_Order {
       }
 
       // PSBT (Refund) nur für Admins erstellen
-      if (current_user_can('manage_options')) {
+      if (current_user_can('manage_options') && $state !== 'dispute') {
         echo '<form method="post" action="" style="margin-top:10px;">';
         echo '<input type="hidden" name="weo_action" value="build_psbt_refund">';
         echo '<input type="hidden" name="weo_nonce" value="'.$nonce.'">';
