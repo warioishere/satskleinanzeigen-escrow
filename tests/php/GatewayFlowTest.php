@@ -2,6 +2,7 @@
 use PHPUnit\Framework\TestCase;
 require_once __DIR__.'/bootstrap.php';
 require_once __DIR__.'/../../includes/class-escrow-notifications.php';
+require_once __DIR__.'/../../includes/class-escrow-admin.php';
 
 class GatewayFlowTest extends TestCase {
     protected function setUp(): void {
@@ -81,6 +82,31 @@ class GatewayFlowTest extends TestCase {
         $this->assertSame('/psbt/finalize', $api_calls[0]['path']);
         $this->assertSame('on-hold', $test_order->status);
         $this->assertArrayHasKey('_weo_dispute', $test_order->meta);
+    }
+
+    public function test_open_dispute_blocked_when_rbf_active() {
+        global $api_calls, $test_order;
+        $test_order->update_meta_data('_weo_rbf_psbt', 'rbf');
+        $_POST = ['order_id'=>1, 'weo_dispute_note'=>'prob', '_wpnonce'=>'nonce'];
+        try { (new WEO_Order())->open_dispute(); $this->fail('no exception'); } catch (Exception $e) {
+            $this->assertStringContainsString('RBF aktiv', $e->getMessage());
+        }
+        $this->assertSame([], $api_calls);
+    }
+
+    public function test_admin_bumpfee_blocked_with_dispute() {
+        global $api_calls, $test_order;
+        $test_order->update_meta_data('_weo_dispute', 'now');
+        $_POST = ['weo_action'=>'bumpfee','target_conf'=>2];
+        $admin = new WEO_Admin();
+        $ref = new ReflectionClass(WEO_Admin::class);
+        $m = $ref->getMethod('handle_action');
+        $m->setAccessible(true);
+        ob_start();
+        $m->invoke($admin, $test_order);
+        $out = ob_get_clean();
+        $this->assertStringContainsString('Fee-Bump während Dispute nicht möglich', $out);
+        $this->assertSame([], $api_calls);
     }
 
     public function test_notify_tx_broadcasted_sends_emails() {

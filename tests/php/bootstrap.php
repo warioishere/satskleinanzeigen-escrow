@@ -94,4 +94,5 @@ class FakeOrder{
   public function get_billing_email(){return 'buyer@example.com';}
   public function update_status($s,$n){$this->status=$s; $this->notes[]=$n;}
   public function add_order_note($n){$this->notes[]=$n;}
+  public function get_id(){return 1;}
 }

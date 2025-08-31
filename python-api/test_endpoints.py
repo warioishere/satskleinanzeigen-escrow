@@ -251,10 +251,28 @@ def test_full_payout_flow(monkeypatch):
     assert r.status_code==200, r.text
     psbt = r.json()['psbt']
     assert psbt=='rbfBase'
+    r=client.post('/psbt/finalize', json={'order_id':'order1','psbt':'','state':'dispute'}, headers=headers)
+    assert r.status_code==400
     # finalize bumped transaction
     r=client.post('/tx/bumpfee/finalize', json={'order_id':'order1','psbt':psbt}, headers=headers)
     assert r.status_code==200, r.text
     assert r.json()['txid']=='txid123'
+
+
+def test_bumpfee_dispute_block(monkeypatch):
+    client=create_client(monkeypatch)
+    import python_api, importlib
+    rpc_module = importlib.import_module('python_api.rpc')
+    admin_module = importlib.import_module('python_api.routes.admin')
+    monkeypatch.setattr(rpc_module, 'rpc', stub_rpc)
+    monkeypatch.setattr(admin_module, 'rpc', stub_rpc)
+    from db import upsert_order, set_payout_txid, update_state
+    upsert_order('order1','desc',0,1,'escrow:order1',60000,0)
+    set_payout_txid('order1','txid123')
+    update_state('order1','dispute')
+    headers={'x-api-key':'testkey'}
+    r=client.post('/tx/bumpfee', json={'order_id':'order1','target_conf':2}, headers=headers)
+    assert r.status_code==400
 
 
 def test_payout_build_insufficient(monkeypatch):
@@ -407,8 +425,8 @@ def test_stuck_worker_watch_only(monkeypatch):
             self.errors = []
         def info(self, event, **kw):
             self.events.append((event, kw))
-        def warning(self, *a, **kw):
-            pass
+        def warning(self, event, **kw):
+            self.events.append((event, kw))
         def error(self, event, **kw):
             self.errors.append((event, kw))
 
@@ -434,6 +452,5 @@ def test_stuck_worker_watch_only(monkeypatch):
     assert finalize_called == []
     assert broadcast_called == []
     assert logger.errors == []
-    assert ('watch_only_no_signatures', {'order_id': 'orderW', 'sign_count': 1}) in logger.events
-    assert ('deadline_escalation_skipped', {'order_id': 'orderW', 'sign_count': 1}) in logger.events
-    assert python_api.STUCK_COUNTER.labels(state='insufficient_signatures')._value.get() == 1
+    assert ('deadline_watchonly_escalated', {'order_id': 'orderW', 'sign_count': 1}) in logger.events
+    assert order['state'] == 'dispute'
