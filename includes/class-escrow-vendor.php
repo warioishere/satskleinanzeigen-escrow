@@ -32,10 +32,16 @@ class WEO_Vendor {
   public function save($user_id) {
     if (!current_user_can('edit_user',$user_id)) return;
     if (isset($_POST['weo_vendor_xpub'])) {
-      update_user_meta($user_id,'weo_vendor_xpub', weo_sanitize_xpub(wp_unslash($_POST['weo_vendor_xpub'])));
+      $norm = weo_normalize_xpub(wp_unslash($_POST['weo_vendor_xpub']));
+      if (!is_wp_error($norm)) {
+        update_user_meta($user_id,'weo_vendor_xpub', $norm);
+      }
     }
     if (isset($_POST['weo_vendor_payout_address'])) {
-      update_user_meta($user_id,'weo_vendor_payout_address', weo_sanitize_btc_address(wp_unslash($_POST['weo_vendor_payout_address'])));
+      $addr = wp_unslash($_POST['weo_vendor_payout_address']);
+      if (weo_validate_btc_address($addr)) {
+        update_user_meta($user_id,'weo_vendor_payout_address', weo_sanitize_btc_address($addr));
+      }
     }
   }
 

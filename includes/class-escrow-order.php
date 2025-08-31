@@ -51,8 +51,10 @@ class WEO_Order {
     $index   = abs(crc32('weo-'.$order->get_order_number())) % 1000000;
     $min_conf = intval(weo_get_option('min_conf',2));
 
+    $oid = weo_sanitize_order_id((string)$order->get_order_number());
+    if (!$oid) return;
     $res = weo_api_post('/orders', [
-      'order_id'   => (string)$order->get_order_number(),
+      'order_id'   => $oid,
       'amount_sat' => $amount_sat,
       'buyer'      => ['xpub'=>$buyer_xpub],
       'seller'     => ['xpub'=>$vendor_xpub],
@@ -85,7 +87,8 @@ class WEO_Order {
     }
 
     // Status von API holen
-    $status  = weo_api_get('/orders/'.rawurlencode($order->get_order_number()).'/status');
+    $oid = weo_sanitize_order_id((string)$order->get_order_number());
+    $status  = weo_api_get('/orders/'.rawurlencode($oid).'/status');
     $funding = is_wp_error($status) ? null : ($status['funding'] ?? null);
     $state   = is_wp_error($status) ? 'unknown' : ($status['state'] ?? 'unknown');
 
@@ -253,15 +256,27 @@ class WEO_Order {
       } else {
         // Betrag: i. d. R. voller Escrow-Input – hier Order-Total in sats
         $amount_sats = intval(round($order->get_total()*1e8));
+        if (!weo_validate_amount($amount_sats)) {
+          echo '<div class="notice weo weo-error"><p>Betrag ungültig.</p></div>';
+          return;
+        }
 
         if ($_POST['weo_action'] === 'build_psbt_payout') {
           $payoutAddr = get_user_meta($order->get_meta('_weo_vendor_id'), 'weo_vendor_payout_address', true);
           if (!$payoutAddr) $payoutAddr = $this->fallback_vendor_payout_address($order_id);
+          if (!weo_validate_btc_address($payoutAddr)) {
+            echo '<div class="notice weo weo-error"><p>Payout-Adresse ungültig.</p></div>';
+            return;
+          }
           $outputs = [ $payoutAddr => $amount_sats ];
         } elseif ($_POST['weo_action'] === 'build_psbt_refund') {
           $refundAddr = get_user_meta($order->get_user_id(), 'weo_buyer_payout_address', true);
           if (!$refundAddr) {
             echo '<div class="notice weo weo-error"><p>Keine Käuferadresse hinterlegt.</p></div>';
+            return;
+          }
+          if (!weo_validate_btc_address($refundAddr)) {
+            echo '<div class="notice weo weo-error"><p>Adresse ungültig.</p></div>';
             return;
           }
           $outputs = [ $refundAddr => $amount_sats ];
@@ -270,8 +285,9 @@ class WEO_Order {
         }
 
         if ($outputs) {
+          $oid = weo_sanitize_order_id((string)$order->get_order_number());
           $resp = weo_api_post('/psbt/build', [
-            'order_id'    => (string)$order->get_order_number(),
+            'order_id'    => $oid,
             'outputs'     => $outputs,
             'rbf'         => true,
             'target_conf' => 3
@@ -322,8 +338,9 @@ class WEO_Order {
     );
 
     // Merge
+    $oid = weo_sanitize_order_id((string)$order->get_order_number());
     $merge = weo_api_post('/psbt/merge', [
-      'order_id' => (string)$order->get_order_number(),
+      'order_id' => $oid,
       'partials' => $all_partials
     ]);
     if (is_wp_error($merge) || empty($merge['psbt'])) {
@@ -337,7 +354,7 @@ class WEO_Order {
 
     // Finalize
     $final = weo_api_post('/psbt/finalize', [
-      'order_id' => (string)$order->get_order_number(),
+      'order_id' => $oid,
       'psbt'     => $merge['psbt']
     ]);
 
@@ -350,7 +367,7 @@ class WEO_Order {
     // Broadcast
     $tx = weo_api_post('/tx/broadcast', [
       'hex'      => $final['hex'],
-      'order_id' => (string)$order->get_order_number()
+      'order_id' => $oid
     ]);
     if (!is_wp_error($tx) && !empty($tx['txid'])) {
       $order->update_meta_data('_weo_payout_txid', $tx['txid']);
@@ -378,9 +395,10 @@ class WEO_Order {
       (array)$order->get_meta('_weo_psbt_partials_seller')
     );
     $psbt = '';
+    $oid = weo_sanitize_order_id((string)$order->get_order_number());
     if ($all_partials) {
       $merge = weo_api_post('/psbt/merge', [
-        'order_id' => (string)$order->get_order_number(),
+        'order_id' => $oid,
         'partials' => $all_partials
       ]);
       if (!is_wp_error($merge) && !empty($merge['psbt'])) $psbt = $merge['psbt'];
@@ -388,20 +406,20 @@ class WEO_Order {
 
     if ($psbt) {
       $final = weo_api_post('/psbt/finalize', [
-        'order_id' => (string)$order->get_order_number(),
+        'order_id' => $oid,
         'psbt'     => $psbt,
         'state'    => 'dispute'
       ]);
       if (!is_wp_error($final) && !empty($final['hex'])) {
         weo_api_post('/tx/broadcast', [
           'hex'      => $final['hex'],
-          'order_id' => (string)$order->get_order_number(),
+          'order_id' => $oid,
           'state'    => 'dispute'
         ]);
       }
     } else {
       weo_api_post('/psbt/finalize', [
-        'order_id' => (string)$order->get_order_number(),
+        'order_id' => $oid,
         'psbt'     => '',
         'state'    => 'dispute'
       ]);

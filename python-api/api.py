@@ -2,7 +2,8 @@ import os, json, hmac, hashlib, time, threading, queue
 from typing import Any, Dict, List, Optional
 from fastapi import FastAPI, HTTPException, Header, Depends
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, validator, root_validator, constr
+import re, base64
 import requests
 from dotenv import load_dotenv
 import db
@@ -84,15 +85,17 @@ def rpc(method: str, params: List[Any] = None) -> Any:
 
 # ---- Models ----
 class Party(BaseModel):
-    xpub: str
+    xpub: constr(strip_whitespace=True, regex=r'^[A-Za-z0-9]+$')
+
+OrderID = constr(regex=r'^[A-Za-z0-9_-]{1,32}$')
 
 class CreateOrderReq(BaseModel):
-    order_id: str
+    order_id: OrderID
     buyer: Party
     seller: Party
     escrow: Party
-    index: int
-    min_conf: int = 2
+    index: int = Field(..., ge=0)
+    min_conf: int = Field(2, ge=0, le=100)
 
 class CreateOrderRes(BaseModel):
     escrow_address: str
@@ -104,31 +107,49 @@ class StatusRes(BaseModel):
     state: str
 
 class PSBTBuildReq(BaseModel):
-    order_id: str
-    outputs: Dict[str, int]   # address -> sats
+    order_id: OrderID
+    outputs: Dict[str, int]
     rbf: bool = True
-    target_conf: int = 3
+    target_conf: int = Field(3, ge=1, le=100)
+
+    @validator('outputs')
+    def _check_outputs(cls, v):
+        addr_re = re.compile(r'^(bc1|tb1)[0-9ac-hj-np-z]{8,87}$')
+        for addr, amt in v.items():
+            if not addr_re.match(addr):
+                raise ValueError('invalid address')
+            if not isinstance(amt, int) or amt <= 0 or amt > 2100000000000000:
+                raise ValueError('invalid amount')
+        return v
 
 class PSBTRes(BaseModel):
     psbt: str
 
 class MergeReq(BaseModel):
-    order_id: Optional[str] = None
+    order_id: Optional[OrderID] = None
     partials: List[str]
 
+    @validator('partials', each_item=True)
+    def _check_part(cls, v):
+        try:
+            base64.b64decode(v, validate=True)
+        except Exception:
+            raise ValueError('invalid psbt fragment')
+        return v
+
 class FinalizeReq(BaseModel):
-    order_id: Optional[str] = None
+    order_id: Optional[OrderID] = None
     psbt: str
-    state: str = "completed"
+    state: str = Field("completed", regex=r'^(completed|refunded|dispute)$')
 
 class BroadcastReq(BaseModel):
     hex: str
-    order_id: Optional[str] = None
-    state: str = "completed"
+    order_id: Optional[OrderID] = None
+    state: str = Field("completed", regex=r'^(completed|refunded|dispute)$')
 
 class BumpFeeReq(BaseModel):
-    order_id: str
-    target_conf: int
+    order_id: OrderID
+    target_conf: int = Field(..., ge=1, le=100)
 
 class DecodeReq(BaseModel):
     psbt: str

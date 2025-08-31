@@ -18,7 +18,16 @@ class WEO_Checkout {
   }
 
   public function validate() {
-    if (empty($_POST['_weo_buyer_xpub'])) wc_add_notice('Bitte Escrow-xpub angeben.', 'error');
+    if (empty($_POST['_weo_buyer_xpub'])) {
+      wc_add_notice('Bitte Escrow-xpub angeben.', 'error');
+      return;
+    }
+    $norm = weo_normalize_xpub(wp_unslash($_POST['_weo_buyer_xpub']));
+    if (is_wp_error($norm)) {
+      wc_add_notice('Ungültiges xpub.', 'error');
+    } else {
+      $_POST['_weo_buyer_xpub'] = $norm;
+    }
   }
 
   public function save($order_id) {
