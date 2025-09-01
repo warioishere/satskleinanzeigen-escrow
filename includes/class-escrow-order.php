@@ -214,7 +214,7 @@ class WEO_Order {
       echo '</form>';
     }
 
-    if (in_array($state, ['escrow_funded','signing'])) {
+    if (in_array($state, ['escrow_funded','signing']) && $signs < 2) {
       $upload_url = esc_url(admin_url('admin-post.php'));
       $confirm = esc_js(__('Disput wirklich eröffnen? Die Bestellung wird in den Disput-Status versetzt und nur der Admin entscheidet über die Auszahlung.', 'weo'));
       echo '<form method="post" action="'.$upload_url.'" style="margin-top:10px;" onsubmit="return confirm(\''.$confirm.'\');">';
@@ -225,7 +225,9 @@ class WEO_Order {
       echo '<textarea name="weo_dispute_note" id="weo_dispute_note_'.intval($order_id).'" rows="4" style="width:100%"></textarea></p>';
       echo '<p><button class="button">'.esc_html__('Dispute eröffnen','weo').'</button></p>';
       echo '</form>';
-      }
+    } elseif (in_array($state, ['escrow_funded','signing']) && $signs >= 2) {
+      echo '<div class="notice weo weo-info"><p>'.esc_html__('Ein Dispute ist nach dem Hochladen und Bestätigen der signierten PSBT nicht mehr möglich.','weo').'</p></div>';
+    }
 
     // PSBT-Flow wenn Escrow funded, Signing läuft oder Disput
     if (in_array($state, ['escrow_funded','signing','dispute','rbf_signing'])) {
@@ -596,6 +598,12 @@ class WEO_Order {
     $cur = get_current_user_id();
     if ($cur !== $buyer_id && $cur !== $vendor_id) wp_die('Nicht erlaubt.');
 
+    $signs = intval($order->get_meta('_weo_psbt_sign_count'));
+    if ($signs >= 2) {
+      wc_add_notice(__('Ein Dispute kann nicht mehr eröffnet werden, nachdem beide Parteien signiert haben.','weo'), 'error');
+      wp_safe_redirect(wp_get_referer()); exit;
+    }
+
     $note = sanitize_textarea_field($_POST['weo_dispute_note'] ?? '');
 
     $oid = weo_sanitize_order_id((string)$order->get_order_number());
@@ -650,6 +658,9 @@ class WEO_Order {
     echo '<p>Watch: <code>'.esc_html($order->get_meta('_weo_watch_id')).'</code></p>';
     $cnt = intval($order->get_meta('_weo_psbt_sign_count'));
     echo '<p>Signaturen: '. $cnt . '/2</p>';
+    if ($cnt >= 2) {
+      echo '<p>'.esc_html__('Ein Dispute kann nicht mehr eröffnet werden, nachdem die signierte PSBT hochgeladen und bestätigt wurde.','weo').'</p>';
+    }
   }
 
   /** Fallback – trag hier eine Vendor-Payout-Adresse ein, falls nicht separat gepflegt */
