@@ -141,9 +141,7 @@ class GatewayFlowTest extends TestCase {
         ob_start();
         (new WEO_Order())->render_order_panel(1);
         $html = ob_get_clean();
-        $this->assertStringContainsString('PSBT kann jederzeit im Dokan-Dashboard', $html);
-        $this->assertStringContainsString('Zum Treuhand-Dashboard', $html);
-        $this->assertStringContainsString('/weo-treuhand-orders', $html);
+        $this->assertStringContainsString('PSBT kann jederzeit über die Treuhand-Seite', $html);
         $this->assertStringContainsString('txid123', $html);
     }
 

@@ -3,37 +3,12 @@ if (!defined('ABSPATH')) exit;
 
 class WEO_Dokan {
   public function __construct() {
-    add_filter('dokan_get_dashboard_nav', [$this,'nav']);
-    add_filter('dokan_query_vars', [$this,'query_vars']);
-    add_action('dokan_load_custom_template', [$this,'page']);
     add_action('init', [$this,'handle_treuhand_settings_post'], 0);
-    add_action('init', [$this,'add_endpoints']);
+    add_shortcode('weo_treuhand', [$this,'render_treuhand_shortcode']);
     add_action('dokan_product_edit_after_pricing', [$this,'product_field'], 10, 2);
     add_action('dokan_process_product_meta', [$this,'save_product_meta'], 10, 2);
     add_filter('woocommerce_is_purchasable', [$this,'is_purchasable'], 10, 2);
     add_filter('woocommerce_loop_add_to_cart_link', [$this,'maybe_hide_add_to_cart'], 10, 3);
-  }
-
-  public function nav($urls) {
-    if (!current_user_can('vendor') && !current_user_can('seller')) return $urls;
-    $urls['weo-treuhand-orders'] = [
-      'title' => __('Treuhand Overview','weo'),
-      'icon'  => '<i class="fas fa-handshake"></i>',
-      'url'   => dokan_get_navigation_url('weo-treuhand-orders'),
-      'pos'   => 51,
-    ];
-    return $urls;
-  }
-
-  public function query_vars($vars) {
-    $vars[] = 'weo-treuhand-orders';
-    $vars[] = 'weo-treuhand';
-    return $vars;
-  }
-
-  public function add_endpoints() {
-    add_rewrite_endpoint('weo-treuhand-orders', EP_ROOT | EP_PAGES);
-    add_rewrite_endpoint('weo-treuhand', EP_ROOT | EP_PAGES);
   }
 
   public function handle_treuhand_settings_post() {
@@ -43,7 +18,8 @@ class WEO_Dokan {
     $user_id = get_current_user_id();
     if (!wp_verify_nonce($_POST['_wpnonce'] ?? '', 'weo_dokan_xpub')) {
       dokan_add_notice(__('Ungültiger Sicherheits-Token','weo'),'error');
-      wp_safe_redirect(dokan_get_navigation_url('weo-treuhand-orders'));
+      $ref = wp_get_referer();
+      wp_safe_redirect($ref ? $ref : home_url('/'));
       exit;
     }
     $xpub_raw   = wp_unslash($_POST['weo_vendor_xpub']);
@@ -80,18 +56,14 @@ class WEO_Dokan {
     if (!$errors) {
       dokan_add_notice(__('Escrow-Daten gespeichert','weo'),'success');
     }
-    wp_safe_redirect(dokan_get_navigation_url('weo-treuhand-orders'));
+    $ref = wp_get_referer();
+    wp_safe_redirect($ref ? $ref : home_url('/'));
     exit;
   }
 
-  public function page($query_vars) {
-    if (!isset($query_vars['weo-treuhand-orders']) && !isset($query_vars['weo-treuhand'])) {
-      return;
-    }
-    if (!current_user_can('vendor') && !current_user_can('seller')) {
-      dokan_add_notice(__('Keine Berechtigung','weo'),'error');
-      return;
-    }
+  public function render_treuhand_shortcode() {
+    if (!is_user_logged_in()) return '';
+    if (!current_user_can('vendor') && !current_user_can('seller')) return '';
 
     $user_id = get_current_user_id();
     wp_enqueue_style('weo-css', WEO_URL.'assets/admin.css', [], '1.0');
@@ -238,6 +210,10 @@ class WEO_Dokan {
       ];
     }
 
+    ob_start();
+    if (function_exists('dokan_get_template_part')) {
+      dokan_get_template_part('global/dokan-notice');
+    }
     echo '<div id="weo-treuhand">';
     $file = WEO_DIR.'templates/dokan-treuhand-orders.php';
     if (file_exists($file)) { $orders = $list; include $file; }
@@ -248,6 +224,7 @@ class WEO_Dokan {
     $file = WEO_DIR.'templates/dokan-treuhand.php';
     if (file_exists($file)) include $file;
     echo '</div>';
+    return ob_get_clean();
   }
 
   public function product_field($post, $post_id) {
