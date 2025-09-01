@@ -5,6 +5,10 @@ class WEO_Dokan {
   public function __construct() {
     add_filter('dokan_get_dashboard_nav', [$this,'nav']);
     add_action('dokan_render_settings_content', [$this,'page']);
+    add_action('dokan_product_edit_after_pricing', [$this,'product_field'], 10, 2);
+    add_action('dokan_process_product_meta', [$this,'save_product_meta'], 10, 2);
+    add_filter('woocommerce_is_purchasable', [$this,'is_purchasable'], 10, 2);
+    add_filter('woocommerce_loop_add_to_cart_link', [$this,'maybe_hide_add_to_cart'], 10, 3);
   }
 
   public function nav($urls) {
@@ -180,20 +184,55 @@ class WEO_Dokan {
       check_admin_referer('weo_dokan_xpub');
       $xpub   = weo_normalize_xpub(wp_unslash($_POST['weo_vendor_xpub']));
       $payout = isset($_POST['weo_payout_address']) ? wp_unslash($_POST['weo_payout_address']) : '';
+      $escrow = isset($_POST['weo_vendor_escrow_enabled']) ? '1' : '';
       $ok = true;
       if (is_wp_error($xpub)) { dokan_add_notice(__('Ungültiges xpub','weo'),'error'); $ok = false; }
       if ($payout && !weo_validate_btc_address($payout)) { dokan_add_notice(__('Ungültige Adresse','weo'),'error'); $ok = false; }
       if ($ok) {
         update_user_meta($user_id,'weo_vendor_xpub',$xpub);
         if ($payout) update_user_meta($user_id,'weo_payout_address', weo_sanitize_btc_address($payout));
+        if ($escrow) update_user_meta($user_id,'weo_vendor_escrow_enabled','1');
+        else delete_user_meta($user_id,'weo_vendor_escrow_enabled');
         dokan_add_notice(__('Escrow-Daten gespeichert','weo'),'success');
       }
     }
 
     $xpub   = get_user_meta($user_id,'weo_vendor_xpub',true);
     $payout = weo_get_payout_address($user_id);
+    $escrow_enabled = get_user_meta($user_id,'weo_vendor_escrow_enabled',true);
     $file = WEO_DIR.'templates/dokan-treuhand.php';
     if (file_exists($file)) include $file;
+  }
+
+  public function product_field($post, $post_id) {
+    $val = get_post_meta($post_id,'_weo_escrow_product',true);
+    ?>
+    <div class="dokan-form-group">
+      <label for="_weo_escrow_product">
+        <input type="checkbox" name="_weo_escrow_product" id="_weo_escrow_product" value="yes" <?php checked($val,'yes'); ?>>
+        <?php esc_html_e('Escrow-Service aktiv','weo'); ?>
+      </label>
+    </div>
+    <?php
+  }
+
+  public function save_product_meta($post_id, $post) {
+    $enabled = isset($_POST['_weo_escrow_product']) ? 'yes' : '';
+    if ($enabled) update_post_meta($post_id,'_weo_escrow_product','yes');
+    else delete_post_meta($post_id,'_weo_escrow_product');
+  }
+
+  public function is_purchasable($purchasable, $product) {
+    if (!$purchasable) return $purchasable;
+    $vendor_id = get_post_field('post_author',$product->get_id());
+    $vendor_on = get_user_meta($vendor_id,'weo_vendor_escrow_enabled',true);
+    $product_on = get_post_meta($product->get_id(),'_weo_escrow_product',true);
+    if (!$vendor_on || !$product_on) return false;
+    return $purchasable;
+  }
+
+  public function maybe_hide_add_to_cart($html, $product, $args) {
+    return $product->is_purchasable() ? $html : '';
   }
 
   /** Fallback – trag hier eine Vendor-Payout-Adresse ein, falls nicht separat gepflegt */
