@@ -60,8 +60,16 @@ class WEO_Dokan {
       $ok = false;
     }
     if ($ok) {
-      if ($xpub_raw !== '') update_user_meta($user_id,'weo_vendor_xpub',$xpub);
-      if ($payout) update_user_meta($user_id,'weo_payout_address', weo_sanitize_btc_address($payout));
+      if ($xpub_raw !== '') {
+        update_user_meta($user_id,'weo_vendor_xpub',$xpub);
+      } else {
+        delete_user_meta($user_id,'weo_vendor_xpub');
+      }
+      if ($payout !== '') {
+        update_user_meta($user_id,'weo_payout_address', weo_sanitize_btc_address($payout));
+      } else {
+        delete_user_meta($user_id,'weo_payout_address');
+      }
       if ($escrow) update_user_meta($user_id,'weo_vendor_escrow_enabled','1');
       else delete_user_meta($user_id,'weo_vendor_escrow_enabled');
       dokan_add_notice(__('Escrow-Daten gespeichert','weo'),'success');
