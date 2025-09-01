@@ -18,7 +18,7 @@ class WEO_Notifications {
     $order = wc_get_order($order_id); if (!$order) return;
     $to = $order->get_billing_email();
     $subject = __('Bestellung versendet', 'weo');
-    $message = sprintf(__('Der Verkäufer hat Bestellung %s als versendet markiert. Bitte bestätige den Empfang im Dokan-Dashboard.', 'weo'), $order->get_order_number());
+    $message = sprintf(__('Der Verkäufer hat Bestellung %s als versendet markiert. Bitte bestätige den Empfang auf der Treuhand-Seite.', 'weo'), $order->get_order_number());
     self::send_mail($to, $subject, $message);
     $order->add_order_note(__('Verkäufer hat Versand markiert; Käufer benachrichtigt.', 'weo'), true);
   }
@@ -29,7 +29,7 @@ class WEO_Notifications {
     $vendor = get_userdata($vendor_id); if (!$vendor) return;
     $to = $vendor->user_email;
     $subject = __('Empfang bestätigt', 'weo');
-    $message = sprintf(__('Der Käufer hat Bestellung %s als erhalten markiert. Bitte signiere die PSBT im Dokan-Dashboard.', 'weo'), $order->get_order_number());
+    $message = sprintf(__('Der Käufer hat Bestellung %s als erhalten markiert. Bitte signiere die PSBT auf der Treuhand-Seite.', 'weo'), $order->get_order_number());
     self::send_mail($to, $subject, $message);
     $order->add_order_note(__('Käufer hat Empfang bestätigt; Verkäufer benachrichtigt.', 'weo'), true);
   }
@@ -42,12 +42,12 @@ class WEO_Notifications {
       $user = get_userdata($vendor_id); if (!$user) return;
       $to = $user->user_email;
       $subject = __('Käufer hat eine PSBT hochgeladen', 'weo');
-      $message = sprintf(__('Der Käufer hat eine signierte PSBT für Bestellung %s hochgeladen. Bitte prüfe und signiere im Dokan-Dashboard.', 'weo'), $order->get_order_number());
+      $message = sprintf(__('Der Käufer hat eine signierte PSBT für Bestellung %s hochgeladen. Bitte prüfe und signiere auf der Treuhand-Seite.', 'weo'), $order->get_order_number());
       $note = __('Käufer hat eine PSBT hochgeladen; Verkäufer benachrichtigt.', 'weo');
     } else {
       $to = $order->get_billing_email();
       $subject = __('Verkäufer hat eine PSBT hochgeladen', 'weo');
-      $message = sprintf(__('Der Verkäufer hat eine signierte PSBT für Bestellung %s hochgeladen. Bitte prüfe und signiere im Dokan-Dashboard.', 'weo'), $order->get_order_number());
+      $message = sprintf(__('Der Verkäufer hat eine signierte PSBT für Bestellung %s hochgeladen. Bitte prüfe und signiere auf der Treuhand-Seite.', 'weo'), $order->get_order_number());
       $note = __('Verkäufer hat eine PSBT hochgeladen; Käufer benachrichtigt.', 'weo');
     }
     self::send_mail($to, $subject, $message);
@@ -74,7 +74,7 @@ class WEO_Notifications {
     $vendor = get_userdata($vendor_id); if (!$vendor) return;
     $to = $vendor->user_email;
     $subject = __('Gebührenerhöhung angefordert', 'weo');
-    $message = sprintf(__('Für Bestellung %s wurde eine RBF-PSBT angefordert. Bitte signiere die neue PSBT im Dashboard.', 'weo'), $order->get_order_number());
+      $message = sprintf(__('Für Bestellung %s wurde eine RBF-PSBT angefordert. Bitte signiere die neue PSBT auf der Treuhand-Seite.', 'weo'), $order->get_order_number());
     self::send_mail($to, $subject, $message);
     $order->add_order_note(__('RBF angefordert; Verkäufer benachrichtigt.', 'weo'), true);
   }

@@ -71,7 +71,7 @@ function check_admin_referer($a=-1,$q='_wpnonce'){return true;}
 function current_time($t){return time();}
 function wp_next_scheduled($h,$a=[]){return false;}
 function wp_schedule_single_event($ts,$h,$a=[]){ global $scheduled; $scheduled[]=['ts'=>$ts,'hook'=>$h,'args'=>$a]; }
-function dokan_get_navigation_url($p){ return '/'.$p; }
+function dokan_get_navigation_url($p){ return '/dashboard/'.$p; }
 function wc_mail($to,$subject,$message){ global $mails; $mails[]=['to'=>$to,'subject'=>$subject,'message'=>$message]; }
 function get_userdata($id){ return (object)['user_email'=>'vendor'.$id.'@example.com']; }
 function get_user_meta($id,$key,$single=true){ return ''; }

@@ -4,7 +4,7 @@ This project links a WooCommerce plugin with a Python FastAPI service to handle 
 
 ## Vendor setup
 
-Dokan sellers can configure their escrow xpub under **Treuhand Service** in the vendor dashboard.
+Dokan sellers can create a page (e.g., `/escrow-settings/`) containing the `[weo_treuhand]` shortcode. The Dokan dashboard adds a **Treuhand Service** menu item linking to that page for vendors to manage their escrow settings and orders.
 
 ## API key management
 

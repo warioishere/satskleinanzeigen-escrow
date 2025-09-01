@@ -1,6 +1,11 @@
 <?php
 if (!defined('ABSPATH')) exit;
 
+// Avoid redeclaring the admin helper if another copy of the plugin loaded it.
+if (class_exists('WEO_Admin')) {
+  return;
+}
+
 class WEO_Admin {
   public function __construct() {
     add_action('admin_menu', [$this, 'menu']);
@@ -10,7 +15,7 @@ class WEO_Admin {
 
   public function menu() {
     add_submenu_page(
-      'woocommerce',
+      'weo-treuhand',
       'Escrows',
       'Escrows',
       'manage_woocommerce',
@@ -19,7 +24,7 @@ class WEO_Admin {
     );
 
     add_submenu_page(
-      'woocommerce',
+      'weo-treuhand',
       'Disputes',
       'Disputes',
       'manage_woocommerce',
