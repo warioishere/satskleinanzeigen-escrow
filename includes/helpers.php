@@ -43,6 +43,19 @@ function weo_sanitize_btc_address($addr) {
   return sanitize_text_field($addr);
 }
 
+function weo_get_payout_address($user_id) {
+  $addr = get_user_meta($user_id, 'weo_payout_address', true);
+  if (!$addr) {
+    $old = get_user_meta($user_id, 'weo_vendor_payout_address', true);
+    if (!$old) $old = get_user_meta($user_id, 'weo_buyer_payout_address', true);
+    if ($old) {
+      update_user_meta($user_id, 'weo_payout_address', $old);
+      $addr = $old;
+    }
+  }
+  return $addr;
+}
+
 // ---- Validation helpers ----
 
 function weo_normalize_xpub($xpub, $network = 'main') {

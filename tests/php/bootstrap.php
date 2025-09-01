@@ -38,6 +38,7 @@ function weo_get_option($k,$default=false){ if ($k==='escrow_xpub') return 'XESC
 function weo_validate_amount($a){return $a>=0;}
 function weo_sanitize_order_id($oid){return $oid;}
 function weo_validate_btc_address($addr){return true;}
+function weo_get_payout_address($uid){ return get_user_meta($uid,'weo_payout_address',true); }
 
 class WP_Error{ private $msg; public function __construct($c,$m){$this->msg=$m;} public function get_error_message(){return $this->msg;} }
 function is_wp_error($v){ return $v instanceof WP_Error; }

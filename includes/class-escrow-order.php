@@ -70,6 +70,11 @@ class WEO_Order {
     echo '<section class="weo-escrow">';
     echo '<h2>Escrow</h2>';
 
+    $cur = get_current_user_id();
+    if ($cur && !weo_get_payout_address($cur)) {
+      echo '<div class="notice weo"><p>'.esc_html__('Bitte hinterlege eine Payout-/Refund-Adresse in deinen Einstellungen.','weo').'</p></div>';
+    }
+
     if (!$addr) {
       echo '<p>Escrow-Adresse wird vorbereitet …</p>';
       echo '</section>';
@@ -677,7 +682,7 @@ class WEO_Order {
         if ($vendor_id) { $order->update_meta_data('_weo_vendor_id',$vendor_id); $order->save(); }
       }
       if ($vendor_id) {
-        $payout = get_user_meta($vendor_id,'weo_vendor_payout_address',true);
+        $payout = weo_get_payout_address($vendor_id);
         if ($payout) return $payout;
       }
     }

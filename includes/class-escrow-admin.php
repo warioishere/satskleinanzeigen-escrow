@@ -314,7 +314,7 @@ class WEO_Admin {
     }
 
     if ($action === 'build_psbt_payout') {
-      $payoutAddr = get_user_meta($order->get_meta('_weo_vendor_id'), 'weo_vendor_payout_address', true);
+      $payoutAddr = weo_get_payout_address($order->get_meta('_weo_vendor_id'));
       if (!$payoutAddr) $payoutAddr = $this->fallback_vendor_payout_address($order_id);
       if (!weo_validate_btc_address($payoutAddr)) {
         echo '<div class="notice notice-error"><p>Payout-Adresse ungültig.</p></div>';
@@ -347,7 +347,7 @@ class WEO_Admin {
         'target_conf' => 3,
       ]);
     } elseif ($action === 'build_psbt_refund') {
-      $refundAddr = get_user_meta($order->get_user_id(), 'weo_buyer_payout_address', true);
+      $refundAddr = weo_get_payout_address($order->get_user_id());
       if (!$refundAddr) {
         echo '<div class="notice notice-error"><p>Keine Käuferadresse hinterlegt.</p></div>';
         return;
@@ -426,7 +426,7 @@ class WEO_Admin {
         if ($vendor_id) { $order->update_meta_data('_weo_vendor_id',$vendor_id); $order->save(); }
       }
       if ($vendor_id) {
-        $payout = get_user_meta($vendor_id,'weo_vendor_payout_address',true);
+        $payout = weo_get_payout_address($vendor_id);
         if ($payout) return $payout;
       }
     }

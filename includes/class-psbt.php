@@ -22,7 +22,7 @@ class WEO_Psbt {
       }
     }
 
-    $payoutAddr = $vendor_id ? get_user_meta($vendor_id,'weo_vendor_payout_address',true) : '';
+    $payoutAddr = $vendor_id ? weo_get_payout_address($vendor_id) : '';
     if (!$payoutAddr) {
       $payoutAddr = get_option('weo_vendor_payout_fallback','');
     }
@@ -68,7 +68,7 @@ class WEO_Psbt {
     $oid = weo_sanitize_order_id((string)$order->get_order_number());
     if (!$oid) return new WP_Error('weo_psbt', __('Order-ID ungültig','weo'));
 
-    $refundAddr = get_user_meta($order->get_user_id(),'weo_buyer_payout_address',true);
+    $refundAddr = weo_get_payout_address($order->get_user_id());
     if (!$refundAddr) return new WP_Error('weo_psbt', __('Keine Käuferadresse hinterlegt.','weo'));
     if (!weo_validate_btc_address($refundAddr)) return new WP_Error('weo_psbt', __('Adresse ungültig.','weo'));
 

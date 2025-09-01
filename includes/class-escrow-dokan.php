@@ -179,19 +179,19 @@ class WEO_Dokan {
     if ('POST' === $_SERVER['REQUEST_METHOD'] && isset($_POST['weo_vendor_xpub'])) {
       check_admin_referer('weo_dokan_xpub');
       $xpub   = weo_normalize_xpub(wp_unslash($_POST['weo_vendor_xpub']));
-      $payout = isset($_POST['weo_vendor_payout_address']) ? wp_unslash($_POST['weo_vendor_payout_address']) : '';
+      $payout = isset($_POST['weo_payout_address']) ? wp_unslash($_POST['weo_payout_address']) : '';
       $ok = true;
       if (is_wp_error($xpub)) { dokan_add_notice(__('Ungültiges xpub','weo'),'error'); $ok = false; }
       if ($payout && !weo_validate_btc_address($payout)) { dokan_add_notice(__('Ungültige Adresse','weo'),'error'); $ok = false; }
       if ($ok) {
         update_user_meta($user_id,'weo_vendor_xpub',$xpub);
-        if ($payout) update_user_meta($user_id,'weo_vendor_payout_address', weo_sanitize_btc_address($payout));
+        if ($payout) update_user_meta($user_id,'weo_payout_address', weo_sanitize_btc_address($payout));
         dokan_add_notice(__('Escrow-Daten gespeichert','weo'),'success');
       }
     }
 
     $xpub   = get_user_meta($user_id,'weo_vendor_xpub',true);
-    $payout = get_user_meta($user_id,'weo_vendor_payout_address',true);
+    $payout = weo_get_payout_address($user_id);
     $file = WEO_DIR.'templates/dokan-treuhand.php';
     if (file_exists($file)) include $file;
   }
@@ -210,7 +210,7 @@ class WEO_Dokan {
         if ($vendor_id) { $order->update_meta_data('_weo_vendor_id',$vendor_id); $order->save(); }
       }
       if ($vendor_id) {
-        $payout = get_user_meta($vendor_id,'weo_vendor_payout_address',true);
+        $payout = weo_get_payout_address($vendor_id);
         if ($payout) return $payout;
       }
     }
