@@ -73,6 +73,7 @@ class WEO_Admin {
       $signs = intval($order->get_meta('_weo_psbt_sign_count'));
       $nonce = wp_create_nonce('weo_psbt_'.$order->get_id());
       $admin_post = esc_url(admin_url('admin-post.php'));
+      $in_dispute = (bool) $order->get_meta('_weo_dispute');
 
       echo '<tr>';
       echo '<td><a href="'.esc_url(get_edit_post_link($order->get_id())).'">#'.esc_html($order->get_order_number()).'</a></td>';
@@ -92,13 +93,15 @@ class WEO_Admin {
       echo '<input type="hidden" name="weo_action" value="build_psbt_refund">';
       echo '<button class="button">Refund</button>';
       echo '</form>';
-      echo '<form method="post" style="display:inline;margin-right:4px;">';
-      echo '<input type="hidden" name="order_id" value="'.intval($order->get_id()).'">';
-      echo '<input type="hidden" name="weo_nonce" value="'.$nonce.'">';
-      echo '<input type="hidden" name="weo_action" value="bumpfee">';
-      echo '<input type="number" name="target_conf" value="1" min="1" style="width:60px;" />';
-      echo '<button class="button">RBF</button>';
-      echo '</form>';
+      if (!$in_dispute) {
+        echo '<form method="post" style="display:inline;margin-right:4px;">';
+        echo '<input type="hidden" name="order_id" value="'.intval($order->get_id()).'">';
+        echo '<input type="hidden" name="weo_nonce" value="'.$nonce.'">';
+        echo '<input type="hidden" name="weo_action" value="bumpfee">';
+        echo '<input type="number" name="target_conf" value="1" min="1" style="width:60px;" />';
+        echo '<button class="button">RBF</button>';
+        echo '</form>';
+      }
       echo '<form method="post" action="'.$admin_post.'" style="display:inline;margin-right:4px;">';
       echo '<input type="hidden" name="action" value="weo_open_dispute">';
       echo '<input type="hidden" name="order_id" value="'.intval($order->get_id()).'">';
