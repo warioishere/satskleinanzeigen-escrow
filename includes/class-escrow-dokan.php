@@ -6,6 +6,7 @@ class WEO_Dokan {
     add_filter('dokan_get_dashboard_nav', [$this,'nav']);
     add_filter('dokan_query_vars', [$this,'query_vars']);
     add_action('dokan_load_custom_template', [$this,'page']);
+    add_action('template_redirect', [$this,'handle_treuhand_settings_post']);
     add_action('init', [$this,'add_endpoints']);
     add_action('dokan_product_edit_after_pricing', [$this,'product_field'], 10, 2);
     add_action('dokan_process_product_meta', [$this,'save_product_meta'], 10, 2);
@@ -33,6 +34,39 @@ class WEO_Dokan {
   public function add_endpoints() {
     add_rewrite_endpoint('weo-treuhand-orders', EP_ROOT | EP_PAGES);
     add_rewrite_endpoint('weo-treuhand', EP_ROOT | EP_PAGES);
+  }
+
+  public function handle_treuhand_settings_post() {
+    if ('POST' !== $_SERVER['REQUEST_METHOD']) return;
+    if (!isset($_POST['weo_vendor_xpub']) && !isset($_POST['weo_payout_address']) && !isset($_POST['weo_vendor_escrow_enabled'])) return;
+    if (!current_user_can('vendor') && !current_user_can('seller')) return;
+    $user_id = get_current_user_id();
+    if (!wp_verify_nonce($_POST['_wpnonce'] ?? '', 'weo_dokan_xpub')) {
+      dokan_add_notice(__('Ungültiger Sicherheits-Token','weo'),'error');
+      wp_safe_redirect(dokan_get_navigation_url('weo-treuhand-orders'));
+      exit;
+    }
+    $xpub_raw = wp_unslash($_POST['weo_vendor_xpub']);
+    $xpub     = $xpub_raw !== '' ? weo_normalize_xpub($xpub_raw) : '';
+    $payout   = isset($_POST['weo_payout_address']) ? wp_unslash($_POST['weo_payout_address']) : '';
+    $escrow   = isset($_POST['weo_vendor_escrow_enabled']) ? '1' : '';
+    $ok       = $xpub_raw === '' || !is_wp_error($xpub);
+    if ($xpub_raw !== '' && is_wp_error($xpub)) {
+      dokan_add_notice(__('Ungültiges xpub','weo'),'error');
+    }
+    if ($payout && !weo_validate_btc_address($payout)) {
+      dokan_add_notice(__('Ungültige Adresse','weo'),'error');
+      $ok = false;
+    }
+    if ($ok) {
+      if ($xpub_raw !== '') update_user_meta($user_id,'weo_vendor_xpub',$xpub);
+      if ($payout) update_user_meta($user_id,'weo_payout_address', weo_sanitize_btc_address($payout));
+      if ($escrow) update_user_meta($user_id,'weo_vendor_escrow_enabled','1');
+      else delete_user_meta($user_id,'weo_vendor_escrow_enabled');
+      dokan_add_notice(__('Escrow-Daten gespeichert','weo'),'success');
+    }
+    wp_safe_redirect(dokan_get_navigation_url('weo-treuhand-orders'));
+    exit;
   }
 
   public function page($query_vars) {
@@ -112,28 +146,6 @@ class WEO_Dokan {
               }
             }
           }
-        }
-      } elseif (isset($_POST['weo_vendor_xpub'])) {
-        if (!wp_verify_nonce($_POST['_wpnonce'] ?? '', 'weo_dokan_xpub')) {
-          dokan_add_notice(__('Ungültiger Sicherheits-Token','weo'),'error');
-          wp_safe_redirect(dokan_get_navigation_url('weo-treuhand-orders'));
-          exit;
-        }
-        $xpub_raw = wp_unslash($_POST['weo_vendor_xpub']);
-        $xpub     = $xpub_raw !== '' ? weo_normalize_xpub($xpub_raw) : '';
-        $payout   = isset($_POST['weo_payout_address']) ? wp_unslash($_POST['weo_payout_address']) : '';
-        $escrow   = isset($_POST['weo_vendor_escrow_enabled']) ? '1' : '';
-        $ok       = $xpub_raw === '' || !is_wp_error($xpub);
-        if ($xpub_raw !== '' && is_wp_error($xpub)) { dokan_add_notice(__('Ungültiges xpub','weo'),'error'); }
-        if ($payout && !weo_validate_btc_address($payout)) { dokan_add_notice(__('Ungültige Adresse','weo'),'error'); $ok = false; }
-        if ($ok) {
-          if ($xpub_raw !== '') update_user_meta($user_id,'weo_vendor_xpub',$xpub);
-          if ($payout) update_user_meta($user_id,'weo_payout_address', weo_sanitize_btc_address($payout));
-          if ($escrow) update_user_meta($user_id,'weo_vendor_escrow_enabled','1');
-          else delete_user_meta($user_id,'weo_vendor_escrow_enabled');
-          dokan_add_notice(__('Escrow-Daten gespeichert','weo'),'success');
-          wp_safe_redirect(dokan_get_navigation_url('weo-treuhand-orders'));
-          exit;
         }
       }
     }
