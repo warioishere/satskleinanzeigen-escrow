@@ -23,6 +23,10 @@ require_once WEO_DIR.'includes/class-escrow-rest.php';
 require_once WEO_DIR.'includes/class-escrow-admin.php';
 require_once WEO_DIR.'includes/class-escrow-notifications.php';
 
+register_activation_hook(WEO_PLUGIN_FILE, function() {
+  flush_rewrite_rules();
+});
+
 add_action('plugins_loaded', function() {
   if (!class_exists('WooCommerce')) {
     return;

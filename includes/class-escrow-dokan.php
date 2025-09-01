@@ -10,6 +10,7 @@ class WEO_Dokan {
     add_filter('woocommerce_is_purchasable', [$this,'is_purchasable'], 10, 2);
     add_filter('woocommerce_loop_add_to_cart_link', [$this,'maybe_hide_add_to_cart'], 10, 3);
     add_filter('dokan_query_vars', [$this,'query_vars']);
+    add_action('init', [$this,'add_endpoints']);
   }
 
   public function nav($urls) {
@@ -240,6 +241,11 @@ class WEO_Dokan {
     $vars[] = 'weo-treuhand-orders';
     $vars[] = 'weo-treuhand';
     return $vars;
+  }
+
+  public function add_endpoints() {
+    add_rewrite_endpoint('weo-treuhand-orders', EP_ROOT | EP_PAGES);
+    add_rewrite_endpoint('weo-treuhand', EP_ROOT | EP_PAGES);
   }
 
   /** Fallback – trag hier eine Vendor-Payout-Adresse ein, falls nicht separat gepflegt */
