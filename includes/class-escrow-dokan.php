@@ -4,7 +4,7 @@ if (!defined('ABSPATH')) exit;
 class WEO_Dokan {
   public function __construct() {
     add_filter('dokan_get_dashboard_nav', [$this,'nav']);
-    add_action('dokan_render_settings_content', [$this,'page']);
+    add_action('dokan_load_custom_template', [$this,'page']);
     add_action('dokan_product_edit_after_pricing', [$this,'product_field'], 10, 2);
     add_action('dokan_process_product_meta', [$this,'save_product_meta'], 10, 2);
     add_filter('woocommerce_is_purchasable', [$this,'is_purchasable'], 10, 2);
