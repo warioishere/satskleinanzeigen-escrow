@@ -2,7 +2,7 @@
 if (!defined('ABSPATH')) exit;
 ?>
 <?php if (!empty($psbt_notice)) echo $psbt_notice; ?>
-<p><?php esc_html_e('PSBTs können jederzeit über diesen Bereich "Treuhand Service" im Dokan-Dashboard erneut abgerufen und signiert werden.','weo'); ?></p>
+<p><?php esc_html_e('PSBTs können jederzeit über diesen Bereich "Treuhand Overview" im Dokan-Dashboard erneut abgerufen und signiert werden.','weo'); ?></p>
 <?php if (!empty($orders)) : ?>
   <?php foreach ($orders as $o) : ?>
     <div class="weo-escrow-order">

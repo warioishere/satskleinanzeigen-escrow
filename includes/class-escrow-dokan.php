@@ -3,15 +3,40 @@ if (!defined('ABSPATH')) exit;
 
 class WEO_Dokan {
   public function __construct() {
-    add_action('dokan_dashboard_content_after', [$this,'render_treuhand_section'], 10, 0);
+    add_filter('dokan_get_dashboard_nav', [$this,'nav']);
+    add_filter('dokan_query_vars', [$this,'query_vars']);
+    add_action('dokan_load_custom_template', [$this,'page']);
+    add_action('init', [$this,'add_endpoints']);
     add_action('dokan_product_edit_after_pricing', [$this,'product_field'], 10, 2);
     add_action('dokan_process_product_meta', [$this,'save_product_meta'], 10, 2);
     add_filter('woocommerce_is_purchasable', [$this,'is_purchasable'], 10, 2);
     add_filter('woocommerce_loop_add_to_cart_link', [$this,'maybe_hide_add_to_cart'], 10, 3);
   }
-  public function render_treuhand_section() {
-    if (!function_exists('dokan_get_current_endpoint') ||
-        dokan_get_current_endpoint() !== 'orders') {
+
+  public function nav($urls) {
+    if (!current_user_can('vendor') && !current_user_can('seller')) return $urls;
+    $urls['weo-treuhand-orders'] = [
+      'title' => __('Treuhand Overview','weo'),
+      'icon'  => '<i class="fas fa-handshake"></i>',
+      'url'   => dokan_get_navigation_url('weo-treuhand-orders'),
+      'pos'   => 51,
+    ];
+    return $urls;
+  }
+
+  public function query_vars($vars) {
+    $vars[] = 'weo-treuhand-orders';
+    $vars[] = 'weo-treuhand';
+    return $vars;
+  }
+
+  public function add_endpoints() {
+    add_rewrite_endpoint('weo-treuhand-orders', EP_ROOT | EP_PAGES);
+    add_rewrite_endpoint('weo-treuhand', EP_ROOT | EP_PAGES);
+  }
+
+  public function page($query_vars) {
+    if (!isset($query_vars['weo-treuhand-orders']) && !isset($query_vars['weo-treuhand'])) {
       return;
     }
     if (!current_user_can('vendor') && !current_user_can('seller')) {

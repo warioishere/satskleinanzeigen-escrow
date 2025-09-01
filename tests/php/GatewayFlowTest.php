@@ -143,7 +143,7 @@ class GatewayFlowTest extends TestCase {
         $html = ob_get_clean();
         $this->assertStringContainsString('PSBT kann jederzeit im Dokan-Dashboard', $html);
         $this->assertStringContainsString('Zum Treuhand-Dashboard', $html);
-        $this->assertStringContainsString('/dashboard/orders/', $html);
+        $this->assertStringContainsString('/weo-treuhand-orders', $html);
         $this->assertStringContainsString('txid123', $html);
     }
 
