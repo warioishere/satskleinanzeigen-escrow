@@ -7,7 +7,7 @@ class WEO_Dokan {
     add_shortcode('weo_treuhand', [$this,'render_treuhand_shortcode']);
     add_filter('dokan_get_dashboard_nav', [$this,'dashboard_nav']);
     add_action('dokan_product_edit_after_pricing', [$this,'product_field'], 10, 2);
-    add_action('dokan_process_product_meta', [$this,'save_product_meta'], 10, 2);
+    add_action('dokan_process_product_meta', [$this,'save_product_meta'], 10, 1);
     add_filter('woocommerce_is_purchasable', [$this,'is_purchasable'], 10, 2);
     add_filter('woocommerce_loop_add_to_cart_link', [$this,'maybe_hide_add_to_cart'], 10, 3);
   }
@@ -247,13 +247,13 @@ class WEO_Dokan {
     <div class="dokan-form-group">
       <label for="_weo_escrow_product">
         <input type="checkbox" name="_weo_escrow_product" id="_weo_escrow_product" value="yes" <?php checked($val,'yes'); ?>>
-        <?php esc_html_e('Escrow-Service aktiv','weo'); ?>
+        <?php esc_html_e('Escrow Service für dieses Produkt anbieten','weo'); ?>
       </label>
     </div>
     <?php
   }
 
-  public function save_product_meta($post_id, $post) {
+  public function save_product_meta($post_id) {
     $enabled = isset($_POST['_weo_escrow_product']) ? 'yes' : '';
     if ($enabled) update_post_meta($post_id,'_weo_escrow_product','yes');
     else delete_post_meta($post_id,'_weo_escrow_product');
