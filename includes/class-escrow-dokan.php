@@ -6,7 +6,7 @@ class WEO_Dokan {
     add_filter('dokan_get_dashboard_nav', [$this,'nav']);
     add_filter('dokan_query_vars', [$this,'query_vars']);
     add_action('dokan_load_custom_template', [$this,'page']);
-    add_action('template_redirect', [$this,'handle_treuhand_settings_post']);
+    add_action('init', [$this,'handle_treuhand_settings_post'], 0);
     add_action('init', [$this,'add_endpoints']);
     add_action('dokan_product_edit_after_pricing', [$this,'product_field'], 10, 2);
     add_action('dokan_process_product_meta', [$this,'save_product_meta'], 10, 2);
@@ -37,7 +37,6 @@ class WEO_Dokan {
   }
 
   public function handle_treuhand_settings_post() {
-    if (!function_exists('dokan_get_navigation_url') || !function_exists('dokan_add_notice')) return;
     if ('POST' !== $_SERVER['REQUEST_METHOD']) return;
     if (!isset($_POST['weo_vendor_xpub']) && !isset($_POST['weo_payout_address']) && !isset($_POST['weo_vendor_escrow_enabled'])) return;
     if (!current_user_can('vendor') && !current_user_can('seller')) return;
