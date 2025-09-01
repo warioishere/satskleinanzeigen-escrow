@@ -37,6 +37,7 @@ class WEO_Dokan {
   }
 
   public function handle_treuhand_settings_post() {
+    if (!function_exists('dokan_get_navigation_url') || !function_exists('dokan_add_notice')) return;
     if ('POST' !== $_SERVER['REQUEST_METHOD']) return;
     if (!isset($_POST['weo_vendor_xpub']) && !isset($_POST['weo_payout_address']) && !isset($_POST['weo_vendor_escrow_enabled'])) return;
     if (!current_user_can('vendor') && !current_user_can('seller')) return;
