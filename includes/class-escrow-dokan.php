@@ -10,7 +10,8 @@ class WEO_Dokan {
     add_filter('woocommerce_loop_add_to_cart_link', [$this,'maybe_hide_add_to_cart'], 10, 3);
   }
   public function render_treuhand_section() {
-    if (function_exists('dokan_get_current_endpoint') && dokan_get_current_endpoint() !== 'orders') {
+    if (!function_exists('dokan_get_current_endpoint') ||
+        dokan_get_current_endpoint() !== 'orders') {
       return;
     }
     if (!current_user_can('vendor') && !current_user_can('seller')) {
