@@ -3,11 +3,11 @@ if (!defined('ABSPATH')) exit;
 
 class WEO_Dokan {
   public function __construct() {
-    add_action('init', [$this,'handle_treuhand_settings_post'], 0);
+    add_action('init', [$this,'handle_treuhand_settings_post'], 10);
     add_shortcode('weo_treuhand', [$this,'render_treuhand_shortcode']);
     add_filter('dokan_get_dashboard_nav', [$this,'dashboard_nav']);
     add_action('dokan_product_edit_after_pricing', [$this,'product_field'], 10, 2);
-    add_action('dokan_process_product_meta', [$this,'save_product_meta'], 10, 2);
+    add_action('dokan_process_product_meta', [$this,'save_product_meta'], 10, 1);
     add_filter('woocommerce_is_purchasable', [$this,'is_purchasable'], 10, 2);
     add_filter('woocommerce_loop_add_to_cart_link', [$this,'maybe_hide_add_to_cart'], 10, 3);
   }
@@ -28,7 +28,7 @@ class WEO_Dokan {
     if (!current_user_can('vendor') && !current_user_can('seller')) return;
     $user_id = get_current_user_id();
     if (!wp_verify_nonce($_POST['_wpnonce'] ?? '', 'weo_dokan_xpub')) {
-      dokan_add_notice(__('Ungültiger Sicherheits-Token','weo'),'error');
+      $this->add_notice(__('Ungültiger Sicherheits-Token','weo'),'error');
       $ref = wp_get_referer();
       wp_safe_redirect($ref ? $ref : home_url('/'));
       exit;
@@ -41,7 +41,7 @@ class WEO_Dokan {
     if ($xpub_raw !== '') {
       $xpub = weo_normalize_xpub($xpub_raw);
       if (is_wp_error($xpub)) {
-        dokan_add_notice(__('Ungültiges xpub','weo'),'error');
+        $this->add_notice(__('Ungültiges xpub','weo'),'error');
         $errors = true;
       } else {
         update_user_meta($user_id,'weo_vendor_xpub',$xpub);
@@ -52,7 +52,7 @@ class WEO_Dokan {
 
     if ($payout_raw !== '') {
       if (!weo_validate_btc_address($payout_raw)) {
-        dokan_add_notice(__('Ungültige Adresse','weo'),'error');
+        $this->add_notice(__('Ungültige Adresse','weo'),'error');
         $errors = true;
       } else {
         update_user_meta($user_id,'weo_payout_address', weo_sanitize_btc_address($payout_raw));
@@ -65,10 +65,13 @@ class WEO_Dokan {
     else delete_user_meta($user_id,'weo_vendor_escrow_enabled');
 
     if (!$errors) {
-      dokan_add_notice(__('Escrow-Daten gespeichert','weo'),'success');
+      $this->add_notice(__('Escrow-Daten gespeichert','weo'),'success');
     }
     $ref = wp_get_referer();
-    wp_safe_redirect($ref ? $ref : home_url('/'));
+    if (!$ref) {
+      $ref = home_url(wp_unslash($_SERVER['REQUEST_URI']));
+    }
+    wp_safe_redirect($ref);
     exit;
   }
 
@@ -87,7 +90,7 @@ class WEO_Dokan {
         $order_id = intval($_POST['order_id']);
         $order = wc_get_order($order_id);
         if (!$order) {
-          dokan_add_notice(__('Bestellung nicht gefunden','weo'),'error');
+          $this->add_notice(__('Bestellung nicht gefunden','weo'),'error');
         } else {
           $act = sanitize_text_field($_POST['weo_action']);
           $vendor_id = intval($order->get_meta('_weo_vendor_id'));
@@ -95,50 +98,50 @@ class WEO_Dokan {
 
           if ($act === 'mark_shipped') {
             if (!wp_verify_nonce($_POST['weo_nonce'] ?? '', 'weo_ship_'.$order_id)) {
-              dokan_add_notice(__('Ungültiger Sicherheits-Token','weo'),'error');
+              $this->add_notice(__('Ungültiger Sicherheits-Token','weo'),'error');
             } elseif ($user_id !== $vendor_id) {
-              dokan_add_notice(__('Keine Berechtigung','weo'),'error');
+              $this->add_notice(__('Keine Berechtigung','weo'),'error');
             } else {
               $order->update_meta_data('_weo_shipped', time());
               $order->save();
               do_action('weo_order_shipped', $order_id);
-              dokan_add_notice(__('Versand markiert','weo'),'success');
+              $this->add_notice(__('Versand markiert','weo'),'success');
             }
           } elseif ($act === 'mark_received') {
             if (!wp_verify_nonce($_POST['weo_nonce'] ?? '', 'weo_recv_'.$order_id)) {
-              dokan_add_notice(__('Ungültiger Sicherheits-Token','weo'),'error');
+              $this->add_notice(__('Ungültiger Sicherheits-Token','weo'),'error');
             } elseif ($user_id !== $buyer_id) {
-              dokan_add_notice(__('Keine Berechtigung','weo'),'error');
+              $this->add_notice(__('Keine Berechtigung','weo'),'error');
             } else {
               $order->update_meta_data('_weo_received', time());
               $order->save();
               do_action('weo_order_received', $order_id);
-              dokan_add_notice(__('Empfang bestätigt','weo'),'success');
+              $this->add_notice(__('Empfang bestätigt','weo'),'success');
             }
           } else {
             if (!wp_verify_nonce($_POST['weo_nonce'] ?? '', 'weo_psbt_'.$order_id)) {
-              dokan_add_notice(__('Ungültiger Sicherheits-Token','weo'),'error');
+              $this->add_notice(__('Ungültiger Sicherheits-Token','weo'),'error');
             } elseif ($act === 'build_psbt_refund') {
               if (!current_user_can('manage_options')) {
-                dokan_add_notice(__('Keine Berechtigung','weo'),'error');
+                $this->add_notice(__('Keine Berechtigung','weo'),'error');
               } else {
                 $res = WEO_Psbt::build_refund_psbt($order_id);
                 if (is_array($res)) {
                   $psbt_notice = '<div class="dokan-alert dokan-alert-success"><p><strong>'.esc_html__('PSBT (Base64)','weo').':</strong></p><textarea rows="4" style="width:100%;">'.$res['psbt'].'</textarea>'.$res['details'].'</div>';
                 } else {
-                  dokan_add_notice($res->get_error_message(),'error');
+                  $this->add_notice($res->get_error_message(),'error');
                 }
               }
             } else {
               if ($vendor_id !== $user_id) {
-                dokan_add_notice(__('Keine Berechtigung','weo'),'error');
+                $this->add_notice(__('Keine Berechtigung','weo'),'error');
               } else {
                 if ($act === 'build_psbt_payout') {
                   $res = WEO_Psbt::build_payout_psbt($order_id);
                   if (is_array($res)) {
                     $psbt_notice = '<div class="dokan-alert dokan-alert-success"><p><strong>'.esc_html__('PSBT (Base64)','weo').':</strong></p><textarea rows="4" style="width:100%;">'.$res['psbt'].'</textarea>'.$res['details'].'</div>';
                   } else {
-                    dokan_add_notice($res->get_error_message(),'error');
+                    $this->add_notice($res->get_error_message(),'error');
                   }
                 }
               }
@@ -244,13 +247,13 @@ class WEO_Dokan {
     <div class="dokan-form-group">
       <label for="_weo_escrow_product">
         <input type="checkbox" name="_weo_escrow_product" id="_weo_escrow_product" value="yes" <?php checked($val,'yes'); ?>>
-        <?php esc_html_e('Escrow-Service aktiv','weo'); ?>
+        <?php esc_html_e('Escrow Service für dieses Produkt anbieten','weo'); ?>
       </label>
     </div>
     <?php
   }
 
-  public function save_product_meta($post_id, $post) {
+  public function save_product_meta($post_id) {
     $enabled = isset($_POST['_weo_escrow_product']) ? 'yes' : '';
     if ($enabled) update_post_meta($post_id,'_weo_escrow_product','yes');
     else delete_post_meta($post_id,'_weo_escrow_product');
@@ -267,6 +270,14 @@ class WEO_Dokan {
 
   public function maybe_hide_add_to_cart($html, $product, $args) {
     return $product->is_purchasable() ? $html : '';
+  }
+
+  private function add_notice($msg, $type) {
+    if (function_exists('dokan_add_notice')) {
+      dokan_add_notice($msg, $type);
+    } else {
+      wc_add_notice($msg, $type);
+    }
   }
 
   /** Fallback – trag hier eine Vendor-Payout-Adresse ein, falls nicht separat gepflegt */
