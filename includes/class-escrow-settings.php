@@ -33,7 +33,9 @@ class WEO_Settings {
   }
 
   public function menu() {
-    add_submenu_page('woocommerce', 'Escrow On-Chain', 'Escrow On-Chain', 'manage_woocommerce', 'weo', [$this,'render']);
+    add_menu_page('Treuhand', 'Treuhand', 'manage_woocommerce', 'weo-treuhand', [$this,'render'], 'dashicons-lock', 56);
+    add_submenu_page('weo-treuhand', 'Einstellungen', 'Einstellungen', 'manage_woocommerce', 'weo', [$this,'render']);
+    remove_submenu_page('weo-treuhand', 'weo-treuhand');
   }
 
   public function field_api() {

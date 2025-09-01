@@ -10,7 +10,7 @@ class WEO_Admin {
 
   public function menu() {
     add_submenu_page(
-      'woocommerce',
+      'weo-treuhand',
       'Escrows',
       'Escrows',
       'manage_woocommerce',
@@ -19,7 +19,7 @@ class WEO_Admin {
     );
 
     add_submenu_page(
-      'woocommerce',
+      'weo-treuhand',
       'Disputes',
       'Disputes',
       'manage_woocommerce',
