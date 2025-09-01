@@ -5,10 +5,21 @@ class WEO_Dokan {
   public function __construct() {
     add_action('init', [$this,'handle_treuhand_settings_post'], 0);
     add_shortcode('weo_treuhand', [$this,'render_treuhand_shortcode']);
+    add_filter('dokan_get_dashboard_nav', [$this,'dashboard_nav']);
     add_action('dokan_product_edit_after_pricing', [$this,'product_field'], 10, 2);
     add_action('dokan_process_product_meta', [$this,'save_product_meta'], 10, 2);
     add_filter('woocommerce_is_purchasable', [$this,'is_purchasable'], 10, 2);
     add_filter('woocommerce_loop_add_to_cart_link', [$this,'maybe_hide_add_to_cart'], 10, 3);
+  }
+
+  public function dashboard_nav($navs) {
+    $navs['weo_treuhand'] = [
+      'title' => __('Treuhand Service','weo'),
+      'icon'  => '<i class="fas fa-handshake"></i>',
+      'url'   => home_url('/escrow-settings/'),
+      'pos'   => 55,
+    ];
+    return $navs;
   }
 
   public function handle_treuhand_settings_post() {
