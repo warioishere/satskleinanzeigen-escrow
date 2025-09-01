@@ -13,7 +13,7 @@ class WEO_Vendor {
   public function field($user) {
     if (!user_can($user,'vendor') && !user_can($user,'seller')) return;
     $xpub   = get_user_meta($user->ID,'weo_vendor_xpub',true);
-    $payout = get_user_meta($user->ID,'weo_vendor_payout_address',true);
+    $payout = weo_get_payout_address($user->ID);
     ?>
     <h3>Escrow xpub (Verkäufer)</h3>
     <table class="form-table">
@@ -22,8 +22,9 @@ class WEO_Vendor {
         <td><input type="text" class="regular-text code" name="weo_vendor_xpub" id="weo_vendor_xpub" value="<?php echo esc_attr($xpub); ?>"></td>
       </tr>
       <tr>
-        <th><label for="weo_vendor_payout_address">Payout-Adresse</label></th>
-        <td><input type="text" class="regular-text code" name="weo_vendor_payout_address" id="weo_vendor_payout_address" value="<?php echo esc_attr($payout); ?>"></td>
+        <th><label for="weo_payout_address">Payout-/Refund-Adresse</label></th>
+        <td><input type="text" class="regular-text code" name="weo_payout_address" id="weo_payout_address" value="<?php echo esc_attr($payout); ?>">
+        <p class="description">Diese Adresse wird für Auszahlungen und Rückerstattungen verwendet.</p></td>
       </tr>
     </table>
     <?php
@@ -37,10 +38,10 @@ class WEO_Vendor {
         update_user_meta($user_id,'weo_vendor_xpub', $norm);
       }
     }
-    if (isset($_POST['weo_vendor_payout_address'])) {
-      $addr = wp_unslash($_POST['weo_vendor_payout_address']);
+    if (isset($_POST['weo_payout_address'])) {
+      $addr = wp_unslash($_POST['weo_payout_address']);
       if (weo_validate_btc_address($addr)) {
-        update_user_meta($user_id,'weo_vendor_payout_address', weo_sanitize_btc_address($addr));
+        update_user_meta($user_id,'weo_payout_address', weo_sanitize_btc_address($addr));
       }
     }
   }

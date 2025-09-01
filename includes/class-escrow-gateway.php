@@ -64,16 +64,17 @@ class WEO_Gateway extends WC_Payment_Gateway {
     $addr_required = true;
     $addr_value    = '';
     if (is_user_logged_in()) {
-      $saved = get_user_meta(get_current_user_id(), 'weo_buyer_payout_address', true);
+      $saved = weo_get_payout_address(get_current_user_id());
       if (!empty($saved)) {
         $addr_value    = $saved;
         $addr_required = false;
       }
     }
-    woocommerce_form_field('_weo_buyer_payout_address', [
+    woocommerce_form_field('_weo_payout_address', [
       'type'        => 'text',
       'class'       => ['form-row-wide'],
-      'label'       => 'Deine Refund-Adresse',
+      'label'       => 'Deine Payout-/Refund-Adresse',
+      'description' => 'Wird für Auszahlungen und Rückerstattungen genutzt',
       'required'    => $addr_required,
       'placeholder' => 'bc1...'
     ], $addr_value);
@@ -95,20 +96,20 @@ class WEO_Gateway extends WC_Payment_Gateway {
     }
     $_POST['_weo_buyer_xpub'] = $norm;
 
-    $saved_addr = is_user_logged_in() ? get_user_meta(get_current_user_id(), 'weo_buyer_payout_address', true) : '';
-    $addr = wp_unslash($_POST['_weo_buyer_payout_address'] ?? '');
+    $saved_addr = is_user_logged_in() ? weo_get_payout_address(get_current_user_id()) : '';
+    $addr = wp_unslash($_POST['_weo_payout_address'] ?? '');
     if (empty($addr)) {
       if (empty($saved_addr)) {
-        wc_add_notice('Bitte Refund-Adresse angeben.', 'error');
+        wc_add_notice('Bitte Payout-/Refund-Adresse angeben.', 'error');
         return false;
       }
       $addr = $saved_addr;
     }
     if (!weo_validate_btc_address($addr)) {
-      wc_add_notice('Refund-Adresse ungültig.', 'error');
+      wc_add_notice('Payout-/Refund-Adresse ungültig.', 'error');
       return false;
     }
-    $_POST['_weo_buyer_payout_address'] = $addr;
+    $_POST['_weo_payout_address'] = $addr;
 
     return true;
   }
@@ -123,9 +124,9 @@ class WEO_Gateway extends WC_Payment_Gateway {
       $order->save();
     }
 
-    $addr = weo_sanitize_btc_address(wp_unslash($_POST['_weo_buyer_payout_address'] ?? ''));
+    $addr = weo_sanitize_btc_address(wp_unslash($_POST['_weo_payout_address'] ?? ''));
     if ($addr && is_user_logged_in()) {
-      update_user_meta(get_current_user_id(), 'weo_buyer_payout_address', $addr);
+      update_user_meta(get_current_user_id(), 'weo_payout_address', $addr);
     }
 
     if (class_exists('WEO_Order')) {
