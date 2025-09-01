@@ -115,14 +115,15 @@ class WEO_Dokan {
         }
       } elseif (isset($_POST['weo_vendor_xpub'])) {
         check_admin_referer('weo_dokan_xpub');
-        $xpub   = weo_normalize_xpub(wp_unslash($_POST['weo_vendor_xpub']));
-        $payout = isset($_POST['weo_payout_address']) ? wp_unslash($_POST['weo_payout_address']) : '';
-        $escrow = isset($_POST['weo_vendor_escrow_enabled']) ? '1' : '';
-        $ok = true;
-        if (is_wp_error($xpub)) { dokan_add_notice(__('Ungültiges xpub','weo'),'error'); $ok = false; }
+        $xpub_raw = wp_unslash($_POST['weo_vendor_xpub']);
+        $xpub     = $xpub_raw !== '' ? weo_normalize_xpub($xpub_raw) : '';
+        $payout   = isset($_POST['weo_payout_address']) ? wp_unslash($_POST['weo_payout_address']) : '';
+        $escrow   = isset($_POST['weo_vendor_escrow_enabled']) ? '1' : '';
+        $ok       = $xpub_raw === '' || !is_wp_error($xpub);
+        if ($xpub_raw !== '' && is_wp_error($xpub)) { dokan_add_notice(__('Ungültiges xpub','weo'),'error'); }
         if ($payout && !weo_validate_btc_address($payout)) { dokan_add_notice(__('Ungültige Adresse','weo'),'error'); $ok = false; }
         if ($ok) {
-          update_user_meta($user_id,'weo_vendor_xpub',$xpub);
+          if ($xpub_raw !== '') update_user_meta($user_id,'weo_vendor_xpub',$xpub);
           if ($payout) update_user_meta($user_id,'weo_payout_address', weo_sanitize_btc_address($payout));
           if ($escrow) update_user_meta($user_id,'weo_vendor_escrow_enabled','1');
           else delete_user_meta($user_id,'weo_vendor_escrow_enabled');
