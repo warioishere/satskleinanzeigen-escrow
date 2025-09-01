@@ -68,7 +68,10 @@ class WEO_Dokan {
       $this->add_notice(__('Escrow-Daten gespeichert','weo'),'success');
     }
     $ref = wp_get_referer();
-    wp_safe_redirect($ref ? $ref : home_url('/'));
+    if (!$ref) {
+      $ref = home_url(wp_unslash($_SERVER['REQUEST_URI']));
+    }
+    wp_safe_redirect($ref);
     exit;
   }
 
