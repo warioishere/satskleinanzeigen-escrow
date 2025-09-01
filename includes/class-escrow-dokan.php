@@ -3,42 +3,26 @@ if (!defined('ABSPATH')) exit;
 
 class WEO_Dokan {
   public function __construct() {
-    add_filter('dokan_get_dashboard_nav', [$this,'nav']);
-    add_action('dokan_load_custom_template', [$this,'page']);
+    add_action('dokan_orders_content_inside_after', [$this,'render_treuhand_section']);
     add_action('dokan_product_edit_after_pricing', [$this,'product_field'], 10, 2);
     add_action('dokan_process_product_meta', [$this,'save_product_meta'], 10, 2);
     add_filter('woocommerce_is_purchasable', [$this,'is_purchasable'], 10, 2);
     add_filter('woocommerce_loop_add_to_cart_link', [$this,'maybe_hide_add_to_cart'], 10, 3);
-    add_filter('dokan_query_vars', [$this,'query_vars']);
-    add_action('init', [$this,'add_endpoints']);
   }
-
-  public function nav($urls) {
-    if (!current_user_can('vendor') && !current_user_can('seller')) return $urls;
-    $urls['weo-treuhand-orders'] = [
-      'title' => __('Treuhand Service','weo'),
-      'icon'  => '<i class="dashicons-lock"></i>',
-      'url'   => dokan_get_navigation_url('weo-treuhand-orders'),
-      'pos'   => 51,
-    ];
-    return $urls;
-  }
-
-  public function page($query_vars) {
+  public function render_treuhand_section() {
     if (!current_user_can('vendor') && !current_user_can('seller')) {
       dokan_add_notice(__('Keine Berechtigung','weo'),'error');
       return;
     }
 
     $user_id = get_current_user_id();
+    wp_enqueue_style('weo-css', WEO_URL.'assets/admin.css', [], '1.0');
+    wp_enqueue_script('weo-qr', WEO_URL.'assets/qr.min.js', [], '1.0', true);
 
-    if (isset($query_vars['weo-treuhand-orders'])) {
-      wp_enqueue_style('weo-css', WEO_URL.'assets/admin.css', [], '1.0');
-      wp_enqueue_script('weo-qr', WEO_URL.'assets/qr.min.js', [], '1.0', true);
+    $psbt_notice = '';
 
-      $psbt_notice = '';
-
-      if ('POST' === $_SERVER['REQUEST_METHOD'] && !empty($_POST['weo_action']) && !empty($_POST['order_id'])) {
+    if ('POST' === $_SERVER['REQUEST_METHOD']) {
+      if (!empty($_POST['weo_action']) && !empty($_POST['order_id'])) {
         $order_id = intval($_POST['order_id']);
         $order = wc_get_order($order_id);
         if (!$order) {
@@ -100,110 +84,107 @@ class WEO_Dokan {
             }
           }
         }
-      }
-
-      $vendor_orders = wc_get_orders([
-        'limit'         => -1,
-        'customer'      => 0,
-        'meta_key'      => '_weo_vendor_id',
-        'meta_value'    => $user_id,
-        'payment_method'=> 'weo_gateway',
-        'return'        => 'objects',
-      ]);
-      $buyer_orders = wc_get_orders([
-        'limit'         => -1,
-        'customer'      => $user_id,
-        'payment_method'=> 'weo_gateway',
-        'return'        => 'objects',
-      ]);
-
-      $list = [];
-      $seen = [];
-      foreach ($vendor_orders as $order) {
-        $addr = $order->get_meta('_weo_escrow_addr');
-        $oid  = weo_sanitize_order_id((string)$order->get_order_number());
-        $state = 'unknown';
-        $funding = null;
-        if ($addr && $oid) {
-          $status = weo_api_get('/orders/'.rawurlencode($oid).'/status');
-          if (!is_wp_error($status)) {
-            $state = $status['state'] ?? 'unknown';
-            $funding = $status['funding'] ?? null;
-          }
+      } elseif (isset($_POST['weo_vendor_xpub'])) {
+        check_admin_referer('weo_dokan_xpub');
+        $xpub   = weo_normalize_xpub(wp_unslash($_POST['weo_vendor_xpub']));
+        $payout = isset($_POST['weo_payout_address']) ? wp_unslash($_POST['weo_payout_address']) : '';
+        $escrow = isset($_POST['weo_vendor_escrow_enabled']) ? '1' : '';
+        $ok = true;
+        if (is_wp_error($xpub)) { dokan_add_notice(__('Ungültiges xpub','weo'),'error'); $ok = false; }
+        if ($payout && !weo_validate_btc_address($payout)) { dokan_add_notice(__('Ungültige Adresse','weo'),'error'); $ok = false; }
+        if ($ok) {
+          update_user_meta($user_id,'weo_vendor_xpub',$xpub);
+          if ($payout) update_user_meta($user_id,'weo_payout_address', weo_sanitize_btc_address($payout));
+          if ($escrow) update_user_meta($user_id,'weo_vendor_escrow_enabled','1');
+          else delete_user_meta($user_id,'weo_vendor_escrow_enabled');
+          dokan_add_notice(__('Escrow-Daten gespeichert','weo'),'success');
         }
-        $list[] = [
-          'id'        => $order->get_id(),
-          'number'    => $order->get_order_number(),
-          'addr'      => $addr,
-          'state'     => $state,
-          'funding'   => $funding,
-          'shipped'   => intval($order->get_meta('_weo_shipped')),
-          'received'  => intval($order->get_meta('_weo_received')),
-          'buyer_id'  => $order->get_user_id(),
-          'vendor_id' => intval($order->get_meta('_weo_vendor_id')),
-          'payout_txid'=> $order->get_meta('_weo_payout_txid'),
-          'role'      => 'vendor',
-        ];
-        $seen[$order->get_id()] = true;
       }
-
-      foreach ($buyer_orders as $order) {
-        if (isset($seen[$order->get_id()])) continue;
-        $addr = $order->get_meta('_weo_escrow_addr');
-        $oid  = weo_sanitize_order_id((string)$order->get_order_number());
-        $state = 'unknown';
-        $funding = null;
-        if ($addr && $oid) {
-          $status = weo_api_get('/orders/'.rawurlencode($oid).'/status');
-          if (!is_wp_error($status)) {
-            $state = $status['state'] ?? 'unknown';
-            $funding = $status['funding'] ?? null;
-          }
-        }
-        $list[] = [
-          'id'        => $order->get_id(),
-          'number'    => $order->get_order_number(),
-          'addr'      => $addr,
-          'state'     => $state,
-          'funding'   => $funding,
-          'shipped'   => intval($order->get_meta('_weo_shipped')),
-          'received'  => intval($order->get_meta('_weo_received')),
-          'buyer_id'  => $order->get_user_id(),
-          'vendor_id' => intval($order->get_meta('_weo_vendor_id')),
-          'payout_txid'=> $order->get_meta('_weo_payout_txid'),
-          'role'      => 'buyer',
-        ];
-      }
-
-      $file = WEO_DIR.'templates/dokan-treuhand-orders.php';
-      if (file_exists($file)) { $orders = $list; include $file; }
-      return;
     }
 
-    if (!isset($query_vars['weo-treuhand'])) return;
+    $vendor_orders = wc_get_orders([
+      'limit'         => -1,
+      'customer'      => 0,
+      'meta_key'      => '_weo_vendor_id',
+      'meta_value'    => $user_id,
+      'payment_method'=> 'weo_gateway',
+      'return'        => 'objects',
+    ]);
+    $buyer_orders = wc_get_orders([
+      'limit'         => -1,
+      'customer'      => $user_id,
+      'payment_method'=> 'weo_gateway',
+      'return'        => 'objects',
+    ]);
 
-    if ('POST' === $_SERVER['REQUEST_METHOD'] && isset($_POST['weo_vendor_xpub'])) {
-      check_admin_referer('weo_dokan_xpub');
-      $xpub   = weo_normalize_xpub(wp_unslash($_POST['weo_vendor_xpub']));
-      $payout = isset($_POST['weo_payout_address']) ? wp_unslash($_POST['weo_payout_address']) : '';
-      $escrow = isset($_POST['weo_vendor_escrow_enabled']) ? '1' : '';
-      $ok = true;
-      if (is_wp_error($xpub)) { dokan_add_notice(__('Ungültiges xpub','weo'),'error'); $ok = false; }
-      if ($payout && !weo_validate_btc_address($payout)) { dokan_add_notice(__('Ungültige Adresse','weo'),'error'); $ok = false; }
-      if ($ok) {
-        update_user_meta($user_id,'weo_vendor_xpub',$xpub);
-        if ($payout) update_user_meta($user_id,'weo_payout_address', weo_sanitize_btc_address($payout));
-        if ($escrow) update_user_meta($user_id,'weo_vendor_escrow_enabled','1');
-        else delete_user_meta($user_id,'weo_vendor_escrow_enabled');
-        dokan_add_notice(__('Escrow-Daten gespeichert','weo'),'success');
+    $list = [];
+    $seen = [];
+    foreach ($vendor_orders as $order) {
+      $addr = $order->get_meta('_weo_escrow_addr');
+      $oid  = weo_sanitize_order_id((string)$order->get_order_number());
+      $state = 'unknown';
+      $funding = null;
+      if ($addr && $oid) {
+        $status = weo_api_get('/orders/'.rawurlencode($oid).'/status');
+        if (!is_wp_error($status)) {
+          $state = $status['state'] ?? 'unknown';
+          $funding = $status['funding'] ?? null;
+        }
       }
+      $list[] = [
+        'id'        => $order->get_id(),
+        'number'    => $order->get_order_number(),
+        'addr'      => $addr,
+        'state'     => $state,
+        'funding'   => $funding,
+        'shipped'   => intval($order->get_meta('_weo_shipped')),
+        'received'  => intval($order->get_meta('_weo_received')),
+        'buyer_id'  => $order->get_user_id(),
+        'vendor_id' => intval($order->get_meta('_weo_vendor_id')),
+        'payout_txid'=> $order->get_meta('_weo_payout_txid'),
+        'role'      => 'vendor',
+      ];
+      $seen[$order->get_id()] = true;
     }
+
+    foreach ($buyer_orders as $order) {
+      if (isset($seen[$order->get_id()])) continue;
+      $addr = $order->get_meta('_weo_escrow_addr');
+      $oid  = weo_sanitize_order_id((string)$order->get_order_number());
+      $state = 'unknown';
+      $funding = null;
+      if ($addr && $oid) {
+        $status = weo_api_get('/orders/'.rawurlencode($oid).'/status');
+        if (!is_wp_error($status)) {
+          $state = $status['state'] ?? 'unknown';
+          $funding = $status['funding'] ?? null;
+        }
+      }
+      $list[] = [
+        'id'        => $order->get_id(),
+        'number'    => $order->get_order_number(),
+        'addr'      => $addr,
+        'state'     => $state,
+        'funding'   => $funding,
+        'shipped'   => intval($order->get_meta('_weo_shipped')),
+        'received'  => intval($order->get_meta('_weo_received')),
+        'buyer_id'  => $order->get_user_id(),
+        'vendor_id' => intval($order->get_meta('_weo_vendor_id')),
+        'payout_txid'=> $order->get_meta('_weo_payout_txid'),
+        'role'      => 'buyer',
+      ];
+    }
+
+    echo '<div id="weo-treuhand">';
+    $file = WEO_DIR.'templates/dokan-treuhand-orders.php';
+    if (file_exists($file)) { $orders = $list; include $file; }
 
     $xpub   = get_user_meta($user_id,'weo_vendor_xpub',true);
     $payout = weo_get_payout_address($user_id);
     $escrow_enabled = get_user_meta($user_id,'weo_vendor_escrow_enabled',true);
     $file = WEO_DIR.'templates/dokan-treuhand.php';
     if (file_exists($file)) include $file;
+    echo '</div>';
   }
 
   public function product_field($post, $post_id) {
@@ -235,17 +216,6 @@ class WEO_Dokan {
 
   public function maybe_hide_add_to_cart($html, $product, $args) {
     return $product->is_purchasable() ? $html : '';
-  }
-
-  public function query_vars($vars) {
-    $vars[] = 'weo-treuhand-orders';
-    $vars[] = 'weo-treuhand';
-    return $vars;
-  }
-
-  public function add_endpoints() {
-    add_rewrite_endpoint('weo-treuhand-orders', EP_ROOT | EP_PAGES);
-    add_rewrite_endpoint('weo-treuhand', EP_ROOT | EP_PAGES);
   }
 
   /** Fallback – trag hier eine Vendor-Payout-Adresse ein, falls nicht separat gepflegt */
