@@ -1,6 +1,11 @@
 <?php
 if (!defined('ABSPATH')) exit;
 
+// Avoid redeclaring the admin helper if another copy of the plugin loaded it.
+if (class_exists('WEO_Admin')) {
+  return;
+}
+
 class WEO_Admin {
   public function __construct() {
     add_action('admin_menu', [$this, 'menu']);
