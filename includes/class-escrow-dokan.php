@@ -3,13 +3,17 @@ if (!defined('ABSPATH')) exit;
 
 class WEO_Dokan {
   public function __construct() {
-    add_action('dokan_orders_content_inside_after', [$this,'render_treuhand_section']);
+    add_action('dokan_dashboard_content_after', [$this,'render_treuhand_section']);
     add_action('dokan_product_edit_after_pricing', [$this,'product_field'], 10, 2);
     add_action('dokan_process_product_meta', [$this,'save_product_meta'], 10, 2);
     add_filter('woocommerce_is_purchasable', [$this,'is_purchasable'], 10, 2);
     add_filter('woocommerce_loop_add_to_cart_link', [$this,'maybe_hide_add_to_cart'], 10, 3);
   }
   public function render_treuhand_section() {
+    $ep = function_exists('dokan_get_current_endpoint') ? dokan_get_current_endpoint() : (function_exists('get_query_var') ? get_query_var('orders') : '');
+    if ($ep !== 'orders') {
+      return;
+    }
     if (!current_user_can('vendor') && !current_user_can('seller')) {
       dokan_add_notice(__('Keine Berechtigung','weo'),'error');
       return;

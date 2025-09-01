@@ -134,7 +134,7 @@ class WEO_Order {
     echo '<p>'.esc_html__('Die PSBT kann jederzeit im Dokan-Dashboard unter "Treuhand Service" erneut abgerufen und signiert werden.', 'weo').'</p>';
     if (function_exists('dokan_get_navigation_url')) {
       $url = dokan_get_navigation_url('orders');
-      $dash_url = esc_url(rtrim($url, '/') . '/#weo-treuhand');
+      $dash_url = esc_url(rtrim($url, '/') . '/');
       echo '<p><a href="'.$dash_url.'" class="button">'.esc_html__('Zum Treuhand-Dashboard', 'weo').'</a></p>';
     }
     $doc_url = esc_url(plugins_url('docs/woo-user-guide.md', WEO_PLUGIN_FILE));
