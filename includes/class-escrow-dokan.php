@@ -9,6 +9,7 @@ class WEO_Dokan {
     add_action('dokan_process_product_meta', [$this,'save_product_meta'], 10, 2);
     add_filter('woocommerce_is_purchasable', [$this,'is_purchasable'], 10, 2);
     add_filter('woocommerce_loop_add_to_cart_link', [$this,'maybe_hide_add_to_cart'], 10, 3);
+    add_filter('dokan_query_vars', [$this,'query_vars']);
   }
 
   public function nav($urls) {
@@ -233,6 +234,12 @@ class WEO_Dokan {
 
   public function maybe_hide_add_to_cart($html, $product, $args) {
     return $product->is_purchasable() ? $html : '';
+  }
+
+  public function query_vars($vars) {
+    $vars[] = 'weo-treuhand-orders';
+    $vars[] = 'weo-treuhand';
+    return $vars;
   }
 
   /** Fallback – trag hier eine Vendor-Payout-Adresse ein, falls nicht separat gepflegt */
