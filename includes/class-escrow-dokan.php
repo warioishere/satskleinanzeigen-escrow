@@ -114,7 +114,11 @@ class WEO_Dokan {
           }
         }
       } elseif (isset($_POST['weo_vendor_xpub'])) {
-        check_admin_referer('weo_dokan_xpub');
+        if (!wp_verify_nonce($_POST['_wpnonce'] ?? '', 'weo_dokan_xpub')) {
+          dokan_add_notice(__('Ungültiger Sicherheits-Token','weo'),'error');
+          wp_safe_redirect(dokan_get_navigation_url('weo-treuhand-orders'));
+          exit;
+        }
         $xpub_raw = wp_unslash($_POST['weo_vendor_xpub']);
         $xpub     = $xpub_raw !== '' ? weo_normalize_xpub($xpub_raw) : '';
         $payout   = isset($_POST['weo_payout_address']) ? wp_unslash($_POST['weo_payout_address']) : '';
@@ -128,6 +132,8 @@ class WEO_Dokan {
           if ($escrow) update_user_meta($user_id,'weo_vendor_escrow_enabled','1');
           else delete_user_meta($user_id,'weo_vendor_escrow_enabled');
           dokan_add_notice(__('Escrow-Daten gespeichert','weo'),'success');
+          wp_safe_redirect(dokan_get_navigation_url('weo-treuhand-orders'));
+          exit;
         }
       }
     }
